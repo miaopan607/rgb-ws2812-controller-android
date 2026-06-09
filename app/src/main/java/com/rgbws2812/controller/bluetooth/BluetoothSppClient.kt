@@ -5,11 +5,13 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import androidx.core.content.ContextCompat
 import com.rgbws2812.controller.model.BluetoothConnectionState
 import com.rgbws2812.controller.model.BluetoothUiState
 import com.rgbws2812.controller.model.DeviceInfo
@@ -108,14 +110,41 @@ class BluetoothSppClient(
             _state.update { it.copy(isEnabled = false, errorMessage = "请先打开系统蓝牙") }
             return
         }
-        registerReceiverIfNeeded()
-        if (bluetoothAdapter.isDiscovering) {
-            bluetoothAdapter.cancelDiscovery()
+        _state.update {
+            it.copy(
+                isAvailable = true,
+                isEnabled = true,
+                isScanning = true,
+                discoveredDevices = emptyList(),
+                statusMessage = "正在启动蓝牙扫描",
+                errorMessage = null
+            )
         }
-        _state.update { it.copy(discoveredDevices = emptyList(), errorMessage = null) }
-        val started = bluetoothAdapter.startDiscovery()
-        if (!started) {
-            _state.update { it.copy(isScanning = false, errorMessage = "蓝牙扫描启动失败") }
+
+        runCatching {
+            registerReceiverIfNeeded()
+            if (bluetoothAdapter.isDiscovering) {
+                bluetoothAdapter.cancelDiscovery()
+            }
+            bluetoothAdapter.startDiscovery()
+        }.onSuccess { started ->
+            if (!started) {
+                _state.update {
+                    it.copy(
+                        isScanning = false,
+                        statusMessage = "蓝牙扫描未启动",
+                        errorMessage = "蓝牙扫描启动失败，请确认系统蓝牙和附近设备可被发现"
+                    )
+                }
+            }
+        }.onFailure { throwable ->
+            _state.update {
+                it.copy(
+                    isScanning = false,
+                    statusMessage = "蓝牙扫描未启动",
+                    errorMessage = "蓝牙扫描失败：${throwable.toUserMessage()}"
+                )
+            }
         }
     }
 
@@ -244,11 +273,12 @@ class BluetoothSppClient(
             addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED)
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(discoveryReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            appContext.registerReceiver(discoveryReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            appContext,
+            discoveryReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         receiverRegistered = true
     }
 
@@ -261,3 +291,10 @@ class BluetoothSppClient(
         val SppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     }
 }
+
+private fun Throwable.toUserMessage(): String =
+    when (this) {
+        is SecurityException -> "缺少蓝牙扫描权限，请重新授权"
+        is ActivityNotFoundException -> "系统蓝牙扫描服务不可用"
+        else -> message ?: javaClass.simpleName
+    }

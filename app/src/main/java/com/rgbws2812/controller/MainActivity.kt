@@ -6,13 +6,17 @@
 package com.rgbws2812.controller
 
 import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,10 +40,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -54,6 +59,8 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -67,7 +74,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -94,6 +103,7 @@ private const val MaxInlineHistory = 12
 
 private val DisplayToHardwareOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
 private val WorkbenchTabs = listOf("预设", "历史", "导入导出")
+private val BluetoothTabs = listOf("扫描发现", "已配对")
 private val QuickColors = listOf(
     "红" to Triple(255, 0, 0),
     "绿" to Triple(0, 255, 0),
@@ -107,6 +117,11 @@ private val FlowOrderPresets = listOf(
     "先偶后奇" to listOf(3, 1, 4, 6, 2, 0, 5, 7),
     "交错" to listOf(3, 4, 2, 5, 1, 6, 0, 7)
 )
+
+private enum class AppPage {
+    Controller,
+    Bluetooth
+}
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -126,16 +141,29 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var currentPage by remember { mutableStateOf(AppPage.Controller) }
+    val navigateBackToController = {
+        currentPage = AppPage.Controller
+    }
     val permissions = remember { bluetoothPermissions() }
+    var bluetoothPermissionsGranted by remember {
+        mutableStateOf(context.hasBluetoothPermissions(permissions))
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        viewModel.refreshBluetooth()
+    ) { result ->
+        bluetoothPermissionsGranted = permissions.all { result[it] == true } || context.hasBluetoothPermissions(permissions)
+        if (bluetoothPermissionsGranted) {
+            viewModel.refreshBluetooth()
+        }
     }
 
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(permissions)
-        viewModel.refreshBluetooth()
+        bluetoothPermissionsGranted = context.hasBluetoothPermissions(permissions)
+        if (bluetoothPermissionsGranted) {
+            viewModel.refreshBluetooth()
+        }
     }
 
     LaunchedEffect(uiState.errorMessage, uiState.statusMessage) {
@@ -150,172 +178,383 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
         onDispose { viewModel.stopDiscovery() }
     }
 
+    BackHandler(enabled = currentPage == AppPage.Bluetooth) {
+        navigateBackToController()
+    }
+
     Scaffold(
+        topBar = {
+            if (currentPage == AppPage.Controller) {
+                ControllerTopBar(
+                    connectionState = uiState.bluetooth.connectionState,
+                    onBluetoothClick = { currentPage = AppPage.Bluetooth }
+                )
+            } else {
+                BluetoothTopBar(
+                    onBack = navigateBackToController
+                )
+            }
+        },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .padding(padding),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                HeaderSection(
-                    bluetoothState = uiState.bluetooth,
-                    onRefresh = { viewModel.refreshBluetooth() },
-                    onRequestPermission = { permissionLauncher.launch(permissions) }
-                )
-            }
-            item {
-                DeviceSection(
-                    state = uiState.bluetooth,
-                    onRefresh = { viewModel.refreshBluetooth() },
-                    onScan = { viewModel.startDiscovery() },
-                    onStopScan = { viewModel.stopDiscovery() },
-                    onConnect = { viewModel.connect(it) },
-                    onDisconnect = { viewModel.disconnect() }
-                )
-            }
-            item {
-                ControlSection(
-                    state = uiState.control,
-                    autoSendEnabled = uiState.autoSendEnabled,
-                    onMode = { viewModel.updateMode(it) },
-                    onColor = { r, g, b -> viewModel.updateColor(r, g, b) },
-                    onBrightness = { viewModel.updateBrightness(it) },
-                    onPeriod = { viewModel.updatePeriod(it) },
-                    onToggleLed = { viewModel.toggleOrderLed(it) },
-                    onOrder = { viewModel.setOrder(it) },
-                    onAutoSend = { viewModel.setAutoSend(it) }
-                )
-            }
-            item {
-                FrameSection(
-                    state = uiState,
-                    onSend = { viewModel.sendCurrent() },
-                    onManualHex = { viewModel.updateManualHex(it) },
-                    onLoadCurrentFrame = { viewModel.loadCurrentFrameToManualHex() },
-                    onSendManual = { viewModel.sendManualHex() }
-                )
-            }
-            item {
-                WorkbenchSection(
-                    state = uiState,
-                    onSavePreset = { viewModel.savePreset(it) },
-                    onLoadPreset = { viewModel.loadPreset(it) },
-                    onRenamePreset = { preset, name -> viewModel.renamePreset(preset, name) },
-                    onDeletePreset = { viewModel.deletePreset(it) },
-                    onResendHistory = { viewModel.resendHistory(it) },
-                    onClearHistory = { viewModel.clearHistory() },
-                    onExport = { viewModel.exportData() },
-                    onImportText = { viewModel.updateImportExportText(it) },
-                    onImport = { viewModel.importData() }
-                )
-            }
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun HeaderSection(
-    bluetoothState: com.rgbws2812.controller.model.BluetoothUiState,
-    onRefresh: () -> Unit,
-    onRequestPermission: () -> Unit
-) {
-    Surface(color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("RGB 彩灯控制", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(
-                text = bluetoothState.statusMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+        when (currentPage) {
+            AppPage.Controller -> ControllerPage(
+                modifier = Modifier.padding(padding),
+                state = uiState,
+                onMode = { viewModel.updateMode(it) },
+                onColor = { r, g, b -> viewModel.updateColor(r, g, b) },
+                onBrightness = { viewModel.updateBrightness(it) },
+                onPeriod = { viewModel.updatePeriod(it) },
+                onToggleLed = { viewModel.toggleOrderLed(it) },
+                onOrder = { viewModel.setOrder(it) },
+                onAutoSend = { viewModel.setAutoSend(it) },
+                onSend = { viewModel.sendCurrent() },
+                onManualHex = { viewModel.updateManualHex(it) },
+                onLoadCurrentFrame = { viewModel.loadCurrentFrameToManualHex() },
+                onSendManual = { viewModel.sendManualHex() },
+                onSavePreset = { viewModel.savePreset(it) },
+                onLoadPreset = { viewModel.loadPreset(it) },
+                onRenamePreset = { preset, name -> viewModel.renamePreset(preset, name) },
+                onDeletePreset = { viewModel.deletePreset(it) },
+                onResendHistory = { viewModel.resendHistory(it) },
+                onClearHistory = { viewModel.clearHistory() },
+                onExport = { viewModel.exportData() },
+                onImportText = { viewModel.updateImportExportText(it) },
+                onImport = { viewModel.importData() }
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(
-                    onClick = onRefresh,
-                    label = { Text(if (bluetoothState.isEnabled) "刷新设备" else "检查蓝牙") }
-                )
-                AssistChip(
-                    onClick = onRequestPermission,
-                    label = { Text("授权") }
-                )
-                AssistChip(
-                    onClick = {},
-                    label = {
-                        Text(
-                            when (bluetoothState.connectionState) {
-                                BluetoothConnectionState.Connected -> "已连接"
-                                BluetoothConnectionState.Connecting -> "连接中"
-                                BluetoothConnectionState.Disconnected -> "未连接"
-                            }
-                        )
+
+            AppPage.Bluetooth -> BluetoothConnectionPage(
+                modifier = Modifier.padding(padding),
+                state = uiState.bluetooth,
+                permissionsGranted = bluetoothPermissionsGranted,
+                onRefresh = {
+                    if (bluetoothPermissionsGranted) {
+                        viewModel.refreshBluetooth()
+                    } else {
+                        permissionLauncher.launch(permissions)
                     }
-                )
-            }
+                },
+                onScan = {
+                    if (bluetoothPermissionsGranted) {
+                        viewModel.startDiscovery()
+                    } else {
+                        permissionLauncher.launch(permissions)
+                    }
+                },
+                onStopScan = { viewModel.stopDiscovery() },
+                onConnect = {
+                    viewModel.connect(it)
+                    navigateBackToController()
+                },
+                onDisconnect = { viewModel.disconnect() },
+                onRequestPermission = { permissionLauncher.launch(permissions) }
+            )
         }
     }
 }
 
 @Composable
-private fun DeviceSection(
+private fun ControllerPage(
+    modifier: Modifier,
+    state: MainUiState,
+    onMode: (ControlMode) -> Unit,
+    onColor: (Int, Int, Int) -> Unit,
+    onBrightness: (Int) -> Unit,
+    onPeriod: (Int) -> Unit,
+    onToggleLed: (Int) -> Unit,
+    onOrder: (List<Int>) -> Unit,
+    onAutoSend: (Boolean) -> Unit,
+    onSend: () -> Unit,
+    onManualHex: (String) -> Unit,
+    onLoadCurrentFrame: () -> Unit,
+    onSendManual: () -> Unit,
+    onSavePreset: (String) -> Unit,
+    onLoadPreset: (Preset) -> Unit,
+    onRenamePreset: (Preset, String) -> Unit,
+    onDeletePreset: (Preset) -> Unit,
+    onResendHistory: (SendHistoryItem) -> Unit,
+    onClearHistory: () -> Unit,
+    onExport: () -> Unit,
+    onImportText: (String) -> Unit,
+    onImport: () -> Unit
+) {
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+        item {
+            ControlSection(
+                state = state.control,
+                autoSendEnabled = state.autoSendEnabled,
+                onMode = onMode,
+                onColor = onColor,
+                onBrightness = onBrightness,
+                onPeriod = onPeriod,
+                onToggleLed = onToggleLed,
+                onOrder = onOrder,
+                onAutoSend = onAutoSend
+            )
+        }
+        item {
+            FrameSection(
+                state = state,
+                onSend = onSend,
+                onManualHex = onManualHex,
+                onLoadCurrentFrame = onLoadCurrentFrame,
+                onSendManual = onSendManual
+            )
+        }
+        item {
+            WorkbenchSection(
+                state = state,
+                onSavePreset = onSavePreset,
+                onLoadPreset = onLoadPreset,
+                onRenamePreset = onRenamePreset,
+                onDeletePreset = onDeletePreset,
+                onResendHistory = onResendHistory,
+                onClearHistory = onClearHistory,
+                onExport = onExport,
+                onImportText = onImportText,
+                onImport = onImport
+            )
+        }
+        item {
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun BluetoothConnectionPage(
+    modifier: Modifier,
     state: com.rgbws2812.controller.model.BluetoothUiState,
+    permissionsGranted: Boolean,
     onRefresh: () -> Unit,
     onScan: () -> Unit,
     onStopScan: () -> Unit,
     onConnect: (DeviceInfo) -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    onRequestPermission: () -> Unit
 ) {
-    AppCard(title = "蓝牙设备") {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = onRefresh) { Text("已配对") }
-            OutlinedButton(onClick = if (state.isScanning) onStopScan else onScan) {
-                Text(if (state.isScanning) "停止扫描" else "扫描发现")
-            }
-            if (state.connectionState == BluetoothConnectionState.Connected) {
-                OutlinedButton(onClick = onDisconnect) { Text("断开") }
+    var selectedTab by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        if (permissionsGranted) {
+            onRefresh()
+        }
+    }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+        item {
+            BluetoothStatusPanel(
+                state = state,
+                permissionsGranted = permissionsGranted,
+                onRequestPermission = onRequestPermission,
+                onDisconnect = onDisconnect
+            )
+        }
+        item {
+            AppCard(title = "选择设备") {
+                TabRow(selectedTabIndex = selectedTab) {
+                    BluetoothTabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = { Text(title) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                when (selectedTab) {
+                    0 -> ScanDevicesTab(
+                        state = state,
+                        permissionsGranted = permissionsGranted,
+                        onScan = onScan,
+                        onStopScan = onStopScan,
+                        onConnect = onConnect
+                    )
+
+                    1 -> PairedDevicesTab(
+                        state = state,
+                        permissionsGranted = permissionsGranted,
+                        onRefresh = onRefresh,
+                        onConnect = onConnect
+                    )
+                }
             }
         }
-        if (state.isScanning) {
-            Spacer(modifier = Modifier.height(10.dp))
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        item {
+            Spacer(modifier = Modifier.height(12.dp))
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        DeviceList(
-            title = "已配对",
-            devices = state.pairedDevices,
-            connectedAddress = state.connectedDevice?.address,
-            onConnect = onConnect
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-        DeviceList(
-            title = "扫描结果",
-            devices = state.discoveredDevices,
-            connectedAddress = state.connectedDevice?.address,
-            onConnect = onConnect
-        )
     }
 }
 
 @Composable
+private fun ControllerTopBar(
+    connectionState: BluetoothConnectionState,
+    onBluetoothClick: () -> Unit
+) {
+    TopAppBar(
+        title = { Text("RGB 彩灯控制") },
+        actions = {
+            IconButton(onClick = onBluetoothClick) {
+                Icon(
+                    painter = painterResource(
+                        id = if (connectionState == BluetoothConnectionState.Connected) {
+                            R.drawable.ic_bluetooth_connected
+                        } else {
+                            R.drawable.ic_bluetooth_disabled
+                        }
+                    ),
+                    contentDescription = if (connectionState == BluetoothConnectionState.Connected) "蓝牙已连接" else "连接蓝牙设备",
+                    tint = if (connectionState == BluetoothConnectionState.Connected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+    )
+}
+
+@Composable
+private fun BluetoothTopBar(onBack: () -> Unit) {
+    TopAppBar(
+        title = { Text("连接蓝牙设备") },
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_arrow_back),
+                    contentDescription = "返回"
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+    )
+}
+
+@Composable
+private fun BluetoothStatusPanel(
+    state: com.rgbws2812.controller.model.BluetoothUiState,
+    permissionsGranted: Boolean,
+    onRequestPermission: () -> Unit,
+    onDisconnect: () -> Unit
+) {
+    AppCard(title = "连接状态") {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(
+                        when (state.connectionState) {
+                            BluetoothConnectionState.Connected -> Color(0xFF1B7F45)
+                            BluetoothConnectionState.Connecting -> MaterialTheme.colorScheme.tertiary
+                            BluetoothConnectionState.Disconnected -> MaterialTheme.colorScheme.outline
+                        }
+                    )
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    when (state.connectionState) {
+                        BluetoothConnectionState.Connected -> state.connectedDevice?.displayName ?: "已连接"
+                        BluetoothConnectionState.Connecting -> "正在连接"
+                        BluetoothConnectionState.Disconnected -> "未连接"
+                    },
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (state.connectedDevice != null) {
+                    Text(state.connectedDevice.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (state.connectionState == BluetoothConnectionState.Connected) {
+                OutlinedButton(onClick = onDisconnect) { Text("断开") }
+            } else if (!permissionsGranted) {
+                Button(onClick = onRequestPermission) { Text("授权蓝牙") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScanDevicesTab(
+    state: com.rgbws2812.controller.model.BluetoothUiState,
+    permissionsGranted: Boolean,
+    onScan: () -> Unit,
+    onStopScan: () -> Unit,
+    onConnect: (DeviceInfo) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = if (state.isScanning) onStopScan else onScan) {
+            Text(
+                when {
+                    state.isScanning -> "停止扫描"
+                    permissionsGranted -> "开始扫描"
+                    else -> "授权并扫描"
+                }
+            )
+        }
+    }
+    if (state.isScanning) {
+        Spacer(modifier = Modifier.height(10.dp))
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+    DeviceList(
+        emptyText = when {
+            !permissionsGranted -> "需要蓝牙权限后才能扫描"
+            state.isScanning -> "正在搜索附近设备"
+            else -> "暂无扫描结果"
+        },
+        devices = state.discoveredDevices,
+        connectedAddress = state.connectedDevice?.address,
+        onConnect = onConnect
+    )
+}
+
+@Composable
+private fun PairedDevicesTab(
+    state: com.rgbws2812.controller.model.BluetoothUiState,
+    permissionsGranted: Boolean,
+    onRefresh: () -> Unit,
+    onConnect: (DeviceInfo) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = onRefresh) { Text(if (permissionsGranted) "刷新已配对" else "授权并刷新") }
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+    DeviceList(
+        emptyText = if (permissionsGranted) "暂无已配对设备" else "需要蓝牙权限后才能读取已配对设备",
+        devices = state.pairedDevices,
+        connectedAddress = state.connectedDevice?.address,
+        onConnect = onConnect
+    )
+}
+
+@Composable
 private fun DeviceList(
-    title: String,
+    emptyText: String,
     devices: List<DeviceInfo>,
     connectedAddress: String?,
     onConnect: (DeviceInfo) -> Unit
 ) {
-    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
     if (devices.isEmpty()) {
-        Text("暂无设备", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         return
     }
     val visibleDevices = remember(devices) { devices.take(MaxInlineDevices) }
@@ -810,6 +1049,11 @@ private fun bluetoothPermissions(): Array<String> =
         arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
     } else {
         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+private fun Context.hasBluetoothPermissions(permissions: Array<String>): Boolean =
+    permissions.all { permission ->
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
     }
 
 private fun formatTime(timestamp: Long): String =
