@@ -44,7 +44,7 @@ object RgbFrameBuilder {
 
     fun build(control: RgbControlState): RgbFrame {
         val clean = control.clamped()
-        val payloadFrames = toPayloadFlowFrames(clean.flowFrames)
+        val payloadFrames = toPayloadFlowFrames(clean)
 
         val payload = listOf(
             clean.mode.wireValue,
@@ -152,6 +152,13 @@ object RgbFrameBuilder {
 
     fun toPayloadFlowFrames(frames: List<Int>): List<Int> =
         RgbControlState.sanitizeFlowFrames(frames)
+
+    private fun toPayloadFlowFrames(control: RgbControlState): List<Int> =
+        if (control.mode == ControlMode.Flow) {
+            toPayloadFlowFrames(control.flowFrames)
+        } else {
+            listOf(0x00)
+        }
 }
 
 fun Int.toHexByte(): String = coerceIn(0, 255).toString(16).uppercase().padStart(2, '0')

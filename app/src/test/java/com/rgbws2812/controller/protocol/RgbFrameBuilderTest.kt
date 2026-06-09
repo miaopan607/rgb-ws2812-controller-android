@@ -9,7 +9,7 @@ import org.junit.Test
 
 class RgbFrameBuilderTest {
     @Test
-    fun staticRedExampleMatchesProtocolDocument() {
+    fun staticRedUsesMinimalPlaceholderFrame() {
         val frame = RgbFrameBuilder.build(
             RgbControlState(
                 mode = ControlMode.Static,
@@ -22,7 +22,8 @@ class RgbFrameBuilderTest {
             )
         )
 
-        assertEquals("AA 55 00 FF 00 00 80 14 08 08 04 02 01 10 20 40 80 9C", frame.spacedHex())
+        assertEquals(listOf(0x00), frame.flowFrames)
+        assertEquals("AA 55 00 FF 00 00 80 14 01 00 6A", frame.spacedHex())
     }
 
     @Test
@@ -61,17 +62,34 @@ class RgbFrameBuilderTest {
 
     @Test
     fun parsesCompactAndSpacedVariableLengthHex() {
-        val spaced = RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 08 08 04 02 01 10 20 40 80 A0")
-        val compact = RgbFrameBuilder.parseHex("AA55030000004014080804020110204080A0")
+        val spaced = RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 01 00 56")
+        val compact = RgbFrameBuilder.parseHex("AA55030000004014010056")
 
         assertEquals(spaced.spacedHex(), compact.spacedHex())
         assertEquals(ControlMode.Gradient, spaced.mode)
-        assertEquals(listOf(0x08, 0x04, 0x02, 0x01, 0x10, 0x20, 0x40, 0x80), spaced.flowFrames)
+        assertEquals(listOf(0x00), spaced.flowFrames)
+    }
+
+    @Test
+    fun breathUsesMinimalPlaceholderFrame() {
+        val frame = RgbFrameBuilder.build(
+            RgbControlState.Default.copy(
+                mode = ControlMode.Breath,
+                red = 0,
+                green = 0,
+                blue = 255,
+                brightness = 128,
+                period = 20
+            )
+        )
+
+        assertEquals(listOf(0x00), frame.flowFrames)
+        assertEquals("AA 55 02 00 00 FF 80 14 01 00 68", frame.spacedHex())
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsBadChecksum() {
-        RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 08 08 04 02 01 10 20 40 80 00")
+        RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 01 00 00")
     }
 
     @Test(expected = IllegalArgumentException::class)
