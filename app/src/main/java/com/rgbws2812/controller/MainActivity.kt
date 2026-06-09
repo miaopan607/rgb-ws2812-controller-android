@@ -1,4 +1,5 @@
 @file:OptIn(
+    androidx.compose.animation.ExperimentalAnimationApi::class,
     androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
     androidx.compose.material3.ExperimentalMaterial3Api::class
 )
@@ -12,12 +13,20 @@ import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -78,6 +87,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -106,6 +116,7 @@ import com.rgbws2812.controller.model.SendHistoryItem
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
 import com.rgbws2812.controller.protocol.toHexByte
 import com.rgbws2812.controller.ui.theme.RgbControllerTheme
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -115,6 +126,8 @@ import kotlin.math.roundToInt
 private const val MaxInlineDevices = 8
 private const val MaxInlinePresets = 8
 private const val MaxInlineHistory = 12
+private const val PageTransitionMillis = 220
+private const val PredictiveBackTravelFraction = 0.32f
 private val FlowEditorGridMaxWidth = 480.dp
 
 private val DisplayToHardwareOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
@@ -186,7 +199,10 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var currentPage by remember { mutableStateOf(AppPage.Controller) }
+    var predictiveBackProgress by remember { mutableStateOf(0f) }
+    val isPredictiveBackInProgress = predictiveBackProgress > 0f
     val navigateBackToController = {
+        predictiveBackProgress = 0f
         currentPage = AppPage.Controller
     }
     val permissions = remember { bluetoothPermissions() }
@@ -221,86 +237,183 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
         onDispose { viewModel.stopDiscovery() }
     }
 
-    BackHandler(enabled = currentPage == AppPage.Bluetooth) {
-        navigateBackToController()
+    PredictiveBackHandler(enabled = currentPage == AppPage.Bluetooth) { progress ->
+        try {
+            progress.collect { backEvent ->
+                predictiveBackProgress = backEvent.progress.coerceIn(0f, 1f)
+            }
+            navigateBackToController()
+        } finally {
+            predictiveBackProgress = 0f
+        }
     }
 
     Scaffold(
         topBar = {
-            if (currentPage == AppPage.Controller) {
-                ControllerTopBar(
-                    connectionState = uiState.bluetooth.connectionState,
-                    onBluetoothClick = { currentPage = AppPage.Bluetooth }
-                )
-            } else {
-                BluetoothTopBar(
-                    onBack = navigateBackToController
-                )
+            AnimatedContent(
+                targetState = currentPage,
+                transitionSpec = { pageTransitionSpec() },
+                label = "TopBarTransition"
+            ) { page ->
+                if (page == AppPage.Controller) {
+                    ControllerTopBar(
+                        connectionState = uiState.bluetooth.connectionState,
+                        onBluetoothClick = { currentPage = AppPage.Bluetooth }
+                    )
+                } else {
+                    BluetoothTopBar(
+                        onBack = navigateBackToController
+                    )
+                }
             }
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        when (currentPage) {
-            AppPage.Controller -> ControllerPage(
-                modifier = Modifier.padding(padding),
-                state = uiState,
-                onMode = { viewModel.updateMode(it) },
-                onColor = { r, g, b -> viewModel.updateColor(r, g, b) },
-                onBrightness = { viewModel.updateBrightness(it) },
-                onPeriod = { viewModel.updatePeriod(it) },
-                onToggleLed = { viewModel.toggleOrderLed(it) },
-                onOrder = { viewModel.setOrder(it) },
-                onToggleFlowFrameLed = { frameIndex, led -> viewModel.toggleFlowFrameLed(frameIndex, led) },
-                onFlowFrames = { viewModel.setFlowFrames(it) },
-                onAddFlowFrame = { viewModel.addFlowFrame() },
-                onDeleteFlowFrame = { viewModel.deleteFlowFrame(it) },
-                onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
-                onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
-                onAutoSend = { viewModel.setAutoSend(it) },
-                onSend = { viewModel.sendCurrent() },
-                onManualHex = { viewModel.updateManualHex(it) },
-                onLoadCurrentFrame = { viewModel.loadCurrentFrameToManualHex() },
-                onSendManual = { viewModel.sendManualHex() },
-                onSavePreset = { viewModel.savePreset(it) },
-                onLoadPreset = { viewModel.loadPreset(it) },
-                onRenamePreset = { preset, name -> viewModel.renamePreset(preset, name) },
-                onDeletePreset = { viewModel.deletePreset(it) },
-                onResendHistory = { viewModel.resendHistory(it) },
-                onClearHistory = { viewModel.clearHistory() },
-                onExport = { viewModel.exportData() },
-                onImportText = { viewModel.updateImportExportText(it) },
-                onImport = { viewModel.importData() }
-            )
+        if (isPredictiveBackInProgress && currentPage == AppPage.Bluetooth) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                ControllerContent(
+                    modifier = Modifier
+                        .padding(padding)
+                        .graphicsLayer {
+                            translationX = -size.width * 0.08f * (1f - predictiveBackProgress)
+                            alpha = 0.88f + 0.12f * predictiveBackProgress
+                        },
+                    state = uiState,
+                    viewModel = viewModel
+                )
+                BluetoothContent(
+                    modifier = Modifier
+                        .padding(padding)
+                        .graphicsLayer {
+                            translationX = size.width * PredictiveBackTravelFraction * predictiveBackProgress
+                            alpha = 1f - 0.18f * predictiveBackProgress
+                        },
+                    state = uiState.bluetooth,
+                    permissionsGranted = bluetoothPermissionsGranted,
+                    permissions = permissions,
+                    permissionLauncher = permissionLauncher,
+                    viewModel = viewModel,
+                    navigateBackToController = navigateBackToController
+                )
+            }
+        } else {
+            AnimatedContent(
+                targetState = currentPage,
+                transitionSpec = { pageTransitionSpec() },
+                label = "PageTransition"
+            ) { page ->
+                when (page) {
+                    AppPage.Controller -> ControllerContent(
+                        modifier = Modifier.padding(padding),
+                        state = uiState,
+                        viewModel = viewModel
+                    )
 
-            AppPage.Bluetooth -> BluetoothConnectionPage(
-                modifier = Modifier.padding(padding),
-                state = uiState.bluetooth,
-                permissionsGranted = bluetoothPermissionsGranted,
-                onRefresh = {
-                    if (bluetoothPermissionsGranted) {
-                        viewModel.refreshBluetooth()
-                    } else {
-                        permissionLauncher.launch(permissions)
-                    }
-                },
-                onScan = {
-                    if (bluetoothPermissionsGranted) {
-                        viewModel.startDiscovery()
-                    } else {
-                        permissionLauncher.launch(permissions)
-                    }
-                },
-                onStopScan = { viewModel.stopDiscovery() },
-                onConnect = {
-                    viewModel.connect(it)
-                    navigateBackToController()
-                },
-                onDisconnect = { viewModel.disconnect() },
-                onRequestPermission = { permissionLauncher.launch(permissions) }
-            )
+                    AppPage.Bluetooth -> BluetoothContent(
+                        modifier = Modifier.padding(padding),
+                        state = uiState.bluetooth,
+                        permissionsGranted = bluetoothPermissionsGranted,
+                        permissions = permissions,
+                        permissionLauncher = permissionLauncher,
+                        viewModel = viewModel,
+                        navigateBackToController = navigateBackToController
+                    )
+                }
+            }
         }
     }
 }
+
+@Composable
+private fun ControllerContent(
+    modifier: Modifier,
+    state: MainUiState,
+    viewModel: MainViewModel
+) {
+    ControllerPage(
+        modifier = modifier,
+        state = state,
+        onMode = { viewModel.updateMode(it) },
+        onColor = { r, g, b -> viewModel.updateColor(r, g, b) },
+        onBrightness = { viewModel.updateBrightness(it) },
+        onPeriod = { viewModel.updatePeriod(it) },
+        onToggleLed = { viewModel.toggleOrderLed(it) },
+        onOrder = { viewModel.setOrder(it) },
+        onToggleFlowFrameLed = { frameIndex, led -> viewModel.toggleFlowFrameLed(frameIndex, led) },
+        onFlowFrames = { viewModel.setFlowFrames(it) },
+        onAddFlowFrame = { viewModel.addFlowFrame() },
+        onDeleteFlowFrame = { viewModel.deleteFlowFrame(it) },
+        onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
+        onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
+        onAutoSend = { viewModel.setAutoSend(it) },
+        onSend = { viewModel.sendCurrent() },
+        onManualHex = { viewModel.updateManualHex(it) },
+        onLoadCurrentFrame = { viewModel.loadCurrentFrameToManualHex() },
+        onSendManual = { viewModel.sendManualHex() },
+        onSavePreset = { viewModel.savePreset(it) },
+        onLoadPreset = { viewModel.loadPreset(it) },
+        onRenamePreset = { preset, name -> viewModel.renamePreset(preset, name) },
+        onDeletePreset = { viewModel.deletePreset(it) },
+        onResendHistory = { viewModel.resendHistory(it) },
+        onClearHistory = { viewModel.clearHistory() },
+        onExport = { viewModel.exportData() },
+        onImportText = { viewModel.updateImportExportText(it) },
+        onImport = { viewModel.importData() }
+    )
+}
+
+@Composable
+private fun BluetoothContent(
+    modifier: Modifier,
+    state: com.rgbws2812.controller.model.BluetoothUiState,
+    permissionsGranted: Boolean,
+    permissions: Array<String>,
+    permissionLauncher: androidx.activity.compose.ManagedActivityResultLauncher<Array<String>, Map<String, Boolean>>,
+    viewModel: MainViewModel,
+    navigateBackToController: () -> Unit
+) {
+    BluetoothConnectionPage(
+        modifier = modifier,
+        state = state,
+        permissionsGranted = permissionsGranted,
+        onRefresh = {
+            if (permissionsGranted) {
+                viewModel.refreshBluetooth()
+            } else {
+                permissionLauncher.launch(permissions)
+            }
+        },
+        onScan = {
+            if (permissionsGranted) {
+                viewModel.startDiscovery()
+            } else {
+                permissionLauncher.launch(permissions)
+            }
+        },
+        onStopScan = { viewModel.stopDiscovery() },
+        onConnect = {
+            viewModel.connect(it)
+            navigateBackToController()
+        },
+        onDisconnect = { viewModel.disconnect() },
+        onRequestPermission = { permissionLauncher.launch(permissions) }
+    )
+}
+
+private fun AnimatedContentTransitionScope<AppPage>.pageTransitionSpec() =
+    if (targetState == AppPage.Bluetooth) {
+        val enter = slideInHorizontally(animationSpec = tween(PageTransitionMillis)) { fullWidth -> fullWidth } +
+            fadeIn(animationSpec = tween(PageTransitionMillis))
+        val exit = slideOutHorizontally(animationSpec = tween(PageTransitionMillis)) { fullWidth -> -fullWidth / 4 } +
+            fadeOut(animationSpec = tween(PageTransitionMillis))
+        enter togetherWith exit
+    } else {
+        val enter = slideInHorizontally(animationSpec = tween(PageTransitionMillis)) { fullWidth -> -fullWidth } +
+            fadeIn(animationSpec = tween(PageTransitionMillis))
+        val exit = slideOutHorizontally(animationSpec = tween(PageTransitionMillis)) { fullWidth -> fullWidth / 4 } +
+            fadeOut(animationSpec = tween(PageTransitionMillis))
+        enter togetherWith exit
+    }
 
 @Composable
 private fun ControllerPage(
