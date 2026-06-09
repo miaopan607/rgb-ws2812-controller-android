@@ -482,7 +482,7 @@ private fun ControllerTopBar(
                     ),
                     contentDescription = if (connectionState == BluetoothConnectionState.Connected) "蓝牙已连接" else "连接蓝牙设备",
                     tint = if (connectionState == BluetoothConnectionState.Connected) {
-                        MaterialTheme.colorScheme.primary
+                        Color(0xFF1B7F45)
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     }
