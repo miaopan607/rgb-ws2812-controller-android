@@ -247,6 +247,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun resetControlParameters() {
+        viewModelScope.launch {
+            storage.saveControl(RgbControlState.Default)
+            manualState.update { it.copy(statusMessage = "参数已还原为默认值") }
+            scheduleAutoSend()
+        }
+    }
+
     fun renamePreset(preset: Preset, newName: String) {
         val cleanName = newName.trim()
         if (cleanName.isBlank()) return

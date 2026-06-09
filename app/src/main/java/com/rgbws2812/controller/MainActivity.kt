@@ -56,6 +56,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -258,7 +261,8 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                 if (page == AppPage.Controller) {
                     ControllerTopBar(
                         connectionState = uiState.bluetooth.connectionState,
-                        onBluetoothClick = { currentPage = AppPage.Bluetooth }
+                        onBluetoothClick = { currentPage = AppPage.Bluetooth },
+                        onResetAllParameters = { viewModel.resetControlParameters() }
                     )
                 } else {
                     BluetoothTopBar(
@@ -579,8 +583,35 @@ private fun BluetoothConnectionPage(
 @Composable
 private fun ControllerTopBar(
     connectionState: BluetoothConnectionState,
-    onBluetoothClick: () -> Unit
+    onBluetoothClick: () -> Unit,
+    onResetAllParameters: () -> Unit
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("还原全部参数") },
+            text = { Text("确认后会将模式、颜色、亮度、周期、流水顺序和高级画面还原为默认值。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showResetConfirm = false
+                        onResetAllParameters()
+                    }
+                ) {
+                    Text("确认还原")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     TopAppBar(
         title = { Text("RGB 彩灯控制") },
         actions = {
@@ -600,6 +631,27 @@ private fun ControllerTopBar(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
+            }
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_menu),
+                        contentDescription = "打开菜单",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("还原全部参数") },
+                        onClick = {
+                            menuExpanded = false
+                            showResetConfirm = true
+                        }
+                    )
+                }
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
