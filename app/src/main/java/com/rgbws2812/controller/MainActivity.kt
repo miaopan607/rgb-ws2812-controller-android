@@ -35,6 +35,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -42,6 +43,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -86,7 +88,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -124,6 +128,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 private const val MaxInlineDevices = 8
@@ -131,7 +136,16 @@ private const val MaxInlinePresets = 8
 private const val MaxInlineHistory = 12
 private const val PageTransitionMillis = 220
 private const val PredictiveBackTravelFraction = 0.32f
+private const val LedPreviewStepMillis = 250
+private const val LedPreviewGamma = 0.3f
 private val FlowEditorGridMaxWidth = 480.dp
+private val LedPreviewPanelMaxWidth = 220.dp
+private val LedPreviewPanelMaxHeight = 96.dp
+private val LedPreviewDiameter = 18.dp
+private val LedPreviewColumnGap = LedPreviewDiameter * 1.5f
+private val LedPreviewRowGap = LedPreviewDiameter
+private val LedPreviewGridWidth = LedPreviewDiameter * 4f + LedPreviewColumnGap * 3f
+private val LedPreviewGridHeight = LedPreviewDiameter * 2f + LedPreviewRowGap
 
 private val DisplayToHardwareOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
 private val WorkbenchTabs = listOf("预设", "历史", "导入导出")
@@ -202,6 +216,7 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var currentPage by remember { mutableStateOf(AppPage.Controller) }
+    var previewVisible by rememberSaveable { mutableStateOf(false) }
     var predictiveBackProgress by remember { mutableStateOf(0f) }
     val isPredictiveBackInProgress = predictiveBackProgress > 0f
     val navigateBackToController = {
@@ -261,6 +276,8 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                 if (page == AppPage.Controller) {
                     ControllerTopBar(
                         connectionState = uiState.bluetooth.connectionState,
+                        previewVisible = previewVisible,
+                        onPreviewClick = { previewVisible = true },
                         onBluetoothClick = { currentPage = AppPage.Bluetooth },
                         onResetAllParameters = { viewModel.resetControlParameters() }
                     )
@@ -283,7 +300,9 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                             alpha = 0.88f + 0.12f * predictiveBackProgress
                         },
                     state = uiState,
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    previewVisible = previewVisible,
+                    onClosePreview = { previewVisible = false }
                 )
                 BluetoothContent(
                     modifier = Modifier
@@ -310,7 +329,9 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                     AppPage.Controller -> ControllerContent(
                         modifier = Modifier.padding(padding),
                         state = uiState,
-                        viewModel = viewModel
+                        viewModel = viewModel,
+                        previewVisible = previewVisible,
+                        onClosePreview = { previewVisible = false }
                     )
 
                     AppPage.Bluetooth -> BluetoothContent(
@@ -332,11 +353,15 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
 private fun ControllerContent(
     modifier: Modifier,
     state: MainUiState,
-    viewModel: MainViewModel
+    viewModel: MainViewModel,
+    previewVisible: Boolean,
+    onClosePreview: () -> Unit
 ) {
     ControllerPage(
         modifier = modifier,
         state = state,
+        previewVisible = previewVisible,
+        onClosePreview = onClosePreview,
         onMode = { viewModel.updateMode(it) },
         onColor = { r, g, b -> viewModel.updateColor(r, g, b) },
         onBrightness = { viewModel.updateBrightness(it) },
@@ -423,6 +448,165 @@ private fun AnimatedContentTransitionScope<AppPage>.pageTransitionSpec() =
 private fun ControllerPage(
     modifier: Modifier,
     state: MainUiState,
+    previewVisible: Boolean,
+    onClosePreview: () -> Unit,
+    onMode: (ControlMode) -> Unit,
+    onColor: (Int, Int, Int) -> Unit,
+    onBrightness: (Int) -> Unit,
+    onPeriod: (Int) -> Unit,
+    onToggleLed: (Int) -> Unit,
+    onOrder: (List<Int>) -> Unit,
+    onToggleFlowFrameLed: (Int, Int) -> Unit,
+    onFlowFrames: (List<Int>) -> Unit,
+    onAddFlowFrame: () -> Unit,
+    onDeleteFlowFrame: (Int) -> Unit,
+    onMoveFlowFrameUp: (Int) -> Unit,
+    onMoveFlowFrameDown: (Int) -> Unit,
+    onAutoSend: (Boolean) -> Unit,
+    onSend: () -> Unit,
+    onManualHex: (String) -> Unit,
+    onLoadCurrentFrame: () -> Unit,
+    onSendManual: () -> Unit,
+    onSavePreset: (String) -> Unit,
+    onLoadPreset: (Preset) -> Unit,
+    onRenamePreset: (Preset, String) -> Unit,
+    onDeletePreset: (Preset) -> Unit,
+    onResendHistory: (SendHistoryItem) -> Unit,
+    onClearHistory: () -> Unit,
+    onExport: () -> Unit,
+    onImportText: (String) -> Unit,
+    onImport: () -> Unit
+) {
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        val isLandscape = maxWidth > maxHeight
+
+        if (previewVisible && isLandscape) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                LedPreviewPanel(
+                    state = state.control,
+                    isLandscape = true,
+                    onClose = onClosePreview,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .widthIn(max = LedPreviewPanelMaxWidth)
+                        .width(LedPreviewPanelMaxWidth)
+                )
+                ControllerPageList(
+                    modifier = Modifier.weight(1f),
+                    state = state,
+                    onMode = onMode,
+                    onColor = onColor,
+                    onBrightness = onBrightness,
+                    onPeriod = onPeriod,
+                    onToggleLed = onToggleLed,
+                    onOrder = onOrder,
+                    onToggleFlowFrameLed = onToggleFlowFrameLed,
+                    onFlowFrames = onFlowFrames,
+                    onAddFlowFrame = onAddFlowFrame,
+                    onDeleteFlowFrame = onDeleteFlowFrame,
+                    onMoveFlowFrameUp = onMoveFlowFrameUp,
+                    onMoveFlowFrameDown = onMoveFlowFrameDown,
+                    onAutoSend = onAutoSend,
+                    onSend = onSend,
+                    onManualHex = onManualHex,
+                    onLoadCurrentFrame = onLoadCurrentFrame,
+                    onSendManual = onSendManual,
+                    onSavePreset = onSavePreset,
+                    onLoadPreset = onLoadPreset,
+                    onRenamePreset = onRenamePreset,
+                    onDeletePreset = onDeletePreset,
+                    onResendHistory = onResendHistory,
+                    onClearHistory = onClearHistory,
+                    onExport = onExport,
+                    onImportText = onImportText,
+                    onImport = onImport
+                )
+            }
+        } else if (previewVisible) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                ControllerPageList(
+                    modifier = Modifier.weight(1f),
+                    state = state,
+                    onMode = onMode,
+                    onColor = onColor,
+                    onBrightness = onBrightness,
+                    onPeriod = onPeriod,
+                    onToggleLed = onToggleLed,
+                    onOrder = onOrder,
+                    onToggleFlowFrameLed = onToggleFlowFrameLed,
+                    onFlowFrames = onFlowFrames,
+                    onAddFlowFrame = onAddFlowFrame,
+                    onDeleteFlowFrame = onDeleteFlowFrame,
+                    onMoveFlowFrameUp = onMoveFlowFrameUp,
+                    onMoveFlowFrameDown = onMoveFlowFrameDown,
+                    onAutoSend = onAutoSend,
+                    onSend = onSend,
+                    onManualHex = onManualHex,
+                    onLoadCurrentFrame = onLoadCurrentFrame,
+                    onSendManual = onSendManual,
+                    onSavePreset = onSavePreset,
+                    onLoadPreset = onLoadPreset,
+                    onRenamePreset = onRenamePreset,
+                    onDeletePreset = onDeletePreset,
+                    onResendHistory = onResendHistory,
+                    onClearHistory = onClearHistory,
+                    onExport = onExport,
+                    onImportText = onImportText,
+                    onImport = onImport
+                )
+                LedPreviewPanel(
+                    state = state.control,
+                    isLandscape = false,
+                    onClose = onClosePreview,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = LedPreviewPanelMaxHeight)
+                        .height(LedPreviewPanelMaxHeight)
+                )
+            }
+        } else {
+            ControllerPageList(
+                modifier = Modifier.fillMaxSize(),
+                state = state,
+                onMode = onMode,
+                onColor = onColor,
+                onBrightness = onBrightness,
+                onPeriod = onPeriod,
+                onToggleLed = onToggleLed,
+                onOrder = onOrder,
+                onToggleFlowFrameLed = onToggleFlowFrameLed,
+                onFlowFrames = onFlowFrames,
+                onAddFlowFrame = onAddFlowFrame,
+                onDeleteFlowFrame = onDeleteFlowFrame,
+                onMoveFlowFrameUp = onMoveFlowFrameUp,
+                onMoveFlowFrameDown = onMoveFlowFrameDown,
+                onAutoSend = onAutoSend,
+                onSend = onSend,
+                onManualHex = onManualHex,
+                onLoadCurrentFrame = onLoadCurrentFrame,
+                onSendManual = onSendManual,
+                onSavePreset = onSavePreset,
+                onLoadPreset = onLoadPreset,
+                onRenamePreset = onRenamePreset,
+                onDeletePreset = onDeletePreset,
+                onResendHistory = onResendHistory,
+                onClearHistory = onClearHistory,
+                onExport = onExport,
+                onImportText = onImportText,
+                onImport = onImport
+            )
+        }
+    }
+}
+
+@Composable
+private fun ControllerPageList(
+    modifier: Modifier,
+    state: MainUiState,
     onMode: (ControlMode) -> Unit,
     onColor: (Int, Int, Int) -> Unit,
     onBrightness: (Int) -> Unit,
@@ -451,9 +635,7 @@ private fun ControllerPage(
     onImport: () -> Unit
 ) {
     LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
@@ -583,6 +765,8 @@ private fun BluetoothConnectionPage(
 @Composable
 private fun ControllerTopBar(
     connectionState: BluetoothConnectionState,
+    previewVisible: Boolean,
+    onPreviewClick: () -> Unit,
     onBluetoothClick: () -> Unit,
     onResetAllParameters: () -> Unit
 ) {
@@ -615,6 +799,16 @@ private fun ControllerTopBar(
     TopAppBar(
         title = { Text("RGB 彩灯控制") },
         actions = {
+            IconButton(onClick = onPreviewClick, enabled = !previewVisible) {
+                PlayPreviewIcon(
+                    modifier = Modifier.size(22.dp),
+                    color = if (previewVisible) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
             IconButton(onClick = onBluetoothClick) {
                 Icon(
                     painter = painterResource(
@@ -672,6 +866,192 @@ private fun BluetoothTopBar(onBack: () -> Unit) {
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
     )
+}
+
+@Composable
+private fun LedPreviewPanel(
+    state: RgbControlState,
+    isLandscape: Boolean,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val cleanFrames = RgbControlState.sanitizeFlowFrames(state.flowFrames)
+    val animationDurationMillis = when (state.mode) {
+        ControlMode.Breath -> (state.period.coerceIn(1, 255) * 100).coerceAtLeast(200)
+        ControlMode.Flow -> cleanFrames.size * LedPreviewStepMillis
+        ControlMode.Gradient -> 8 * LedPreviewStepMillis
+        else -> LedPreviewStepMillis
+    }
+    var progress by remember { mutableStateOf(0f) }
+
+    LaunchedEffect(state.mode, state.period, cleanFrames) {
+        val startMillis = withFrameMillis { it }
+        while (true) {
+            val frameMillis = withFrameMillis { it }
+            val elapsed = (frameMillis - startMillis).coerceAtLeast(0L)
+            progress = (elapsed % animationDurationMillis).toFloat() / animationDurationMillis
+        }
+    }
+
+    val frameIndex = ((progress * cleanFrames.size).toInt()).coerceIn(0, cleanFrames.lastIndex)
+    val gradientPhase = ((progress * 8f).toInt()).coerceIn(0, 7)
+    val activeMask = when (state.mode) {
+        ControlMode.Flow -> cleanFrames[frameIndex]
+        else -> 0xFF
+    }
+    val brightnessPhase = when (state.mode) {
+        ControlMode.Breath -> {
+            if (progress < 0.5f) {
+                progress * 2f
+            } else {
+                (1f - progress) * 2f
+            }
+        }
+        else -> 1f
+    }
+    val displayMaxBrightness = (state.brightness.coerceIn(0, 255) / 255f).pow(LedPreviewGamma)
+    val brightnessFactor = brightnessPhase * displayMaxBrightness
+    val baseColor = Color(state.red.coerceIn(0, 255), state.green.coerceIn(0, 255), state.blue.coerceIn(0, 255))
+    val dividerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+
+    Box(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
+        if (isLandscape) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawLine(
+                    color = dividerColor,
+                    start = Offset(size.width - 1.dp.toPx() / 2f, 0f),
+                    end = Offset(size.width - 1.dp.toPx() / 2f, size.height),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                LedPreviewGrid(
+                    activeMask = activeMask,
+                    baseColor = baseColor,
+                    gradientPhase = gradientPhase,
+                    mode = state.mode,
+                    brightnessFactor = brightnessFactor,
+                    modifier = Modifier.size(LedPreviewGridWidth, LedPreviewGridHeight)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                IconButton(onClick = onClose) {
+                    ClosePreviewIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawLine(
+                    color = dividerColor,
+                    start = Offset(0f, 1.dp.toPx() / 2f),
+                    end = Offset(size.width, 1.dp.toPx() / 2f),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                LedPreviewGrid(
+                    activeMask = activeMask,
+                    baseColor = baseColor,
+                    gradientPhase = gradientPhase,
+                    mode = state.mode,
+                    brightnessFactor = brightnessFactor,
+                    modifier = Modifier.size(LedPreviewGridWidth, LedPreviewGridHeight)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                IconButton(onClick = onClose) {
+                    ClosePreviewIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LedPreviewGrid(
+    activeMask: Int,
+    baseColor: Color,
+    gradientPhase: Int,
+    mode: ControlMode,
+    brightnessFactor: Float,
+    modifier: Modifier = Modifier
+) {
+    val offColor = MaterialTheme.colorScheme.surfaceVariant
+    val outlineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+    val displayBrightness = brightnessFactor.coerceIn(0f, 1f)
+
+    Canvas(modifier = modifier) {
+        val columns = 4
+        val diameter = LedPreviewDiameter.toPx()
+        val radius = diameter / 2f
+        val columnGap = LedPreviewColumnGap.toPx()
+        val rowGap = LedPreviewRowGap.toPx()
+        val gridWidth = diameter * 4f + columnGap * 3f
+        val gridHeight = diameter * 2f + rowGap
+        val startX = (size.width - gridWidth) / 2f + radius
+        val startY = (size.height - gridHeight) / 2f + radius
+
+        DisplayToHardwareOrder.forEachIndexed { index, led ->
+            val row = index / columns
+            val column = index % columns
+            val center = Offset(
+                x = startX + column * (diameter + columnGap),
+                y = startY + row * (diameter + rowGap)
+            )
+            val selected = (activeMask and (1 shl led)) != 0
+            val ledColor = if (mode == ControlMode.Gradient) {
+                gradientPreviewColor(gradientPhase + led)
+            } else {
+                baseColor
+            }
+            if (selected) {
+                drawCircle(
+                    color = ledColor.copy(alpha = (0.14f + 0.32f * displayBrightness).coerceIn(0f, 0.6f)),
+                    radius = radius * 1.55f,
+                    center = center
+                )
+                drawCircle(
+                    color = ledColor.copy(alpha = displayBrightness),
+                    radius = radius,
+                    center = center
+                )
+            } else {
+                drawCircle(
+                    color = offColor,
+                    radius = radius,
+                    center = center
+                )
+            }
+            drawCircle(
+                color = outlineColor,
+                radius = radius,
+                center = center,
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
+    }
+}
+
+private fun gradientPreviewColor(phase: Int): Color =
+    when (phase.floorMod(8)) {
+        0, 3, 6 -> Color(0xFF00FF00)
+        1, 4, 7 -> Color(0xFFFF0000)
+        else -> Color(0xFF0000FF)
+    }
+
+private fun Int.floorMod(divisor: Int): Int {
+    val result = this % divisor
+    return if (result < 0) result + divisor else result
 }
 
 @Composable
@@ -1093,6 +1473,38 @@ private fun AddFrameIcon(modifier: Modifier = Modifier, color: Color) {
             color = color,
             start = Offset(size.width * 0.2f, size.height * 0.5f),
             end = Offset(size.width * 0.8f, size.height * 0.5f),
+            strokeWidth = stroke
+        )
+    }
+}
+
+@Composable
+private fun PlayPreviewIcon(modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(size.width * 0.32f, size.height * 0.2f)
+            lineTo(size.width * 0.78f, size.height * 0.5f)
+            lineTo(size.width * 0.32f, size.height * 0.8f)
+            close()
+        }
+        drawPath(path = path, color = color)
+    }
+}
+
+@Composable
+private fun ClosePreviewIcon(modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val stroke = 2.dp.toPx()
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.25f, size.height * 0.25f),
+            end = Offset(size.width * 0.75f, size.height * 0.75f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.75f, size.height * 0.25f),
+            end = Offset(size.width * 0.25f, size.height * 0.75f),
             strokeWidth = stroke
         )
     }
