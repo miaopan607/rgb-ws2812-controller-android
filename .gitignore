@@ -7,3 +7,5 @@ app/build/
 captures/
 *.apk
 *.aab
+
+AGENTS.md

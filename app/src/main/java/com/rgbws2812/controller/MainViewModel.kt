@@ -31,6 +31,7 @@ data class MainUiState(
     val control: RgbControlState = RgbControlState.Default,
     val frame: RgbFrame = RgbFrameBuilder.build(RgbControlState.Default),
     val orderValid: Boolean = true,
+    val flowFramesValid: Boolean = true,
     val autoSendEnabled: Boolean = false,
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList(),
@@ -51,10 +52,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         combine(storage.state, bluetoothClient.state, manualState) { storageState, bluetoothState, manual ->
             val frame = RgbFrameBuilder.build(storageState.control)
             val orderValid = RgbFrameBuilder.isValidOrder(storageState.control.order)
+            val flowFramesValid = RgbFrameBuilder.isValidFlowFrames(storageState.control.flowFrames)
             MainUiState(
                 control = storageState.control,
                 frame = frame,
                 orderValid = orderValid,
+                flowFramesValid = flowFramesValid,
                 autoSendEnabled = storageState.autoSendEnabled,
                 presets = storageState.presets,
                 history = storageState.history,
@@ -110,12 +113,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else if (mutable.size < 8) {
                 mutable.add(led)
             }
-            current.copy(order = mutable)
+            val order = mutable.filter { it in 0..7 }.distinct().take(RgbControlState.MaxFlowFrames)
+            current.copy(order = order, flowFrames = RgbFrameBuilder.orderToFlowFrames(order))
         }
     }
 
     fun setOrder(order: List<Int>) {
-        updateControl { it.copy(order = order.filter { value -> value in 0..7 }.distinct().take(8)) }
+        updateControl {
+            val cleanOrder = order.filter { value -> value in 0..7 }.distinct().take(RgbControlState.MaxFlowFrames)
+            it.copy(order = cleanOrder, flowFrames = RgbFrameBuilder.orderToFlowFrames(cleanOrder))
+        }
+    }
+
+    fun addFlowFrame() {
+        updateControl { current ->
+            if (current.flowFrames.size >= RgbControlState.MaxFlowFrames) {
+                current
+            } else {
+                current.copy(flowFrames = current.flowFrames + 0)
+            }
+        }
+    }
+
+    fun deleteFlowFrame(index: Int) {
+        updateControl { current ->
+            if (index !in current.flowFrames.indices || current.flowFrames.size <= 1) {
+                current
+            } else {
+                val frames = current.flowFrames.toMutableList()
+                frames.removeAt(index)
+                current.copy(flowFrames = frames.ifEmpty { listOf(0) })
+            }
+        }
+    }
+
+    fun moveFlowFrameUp(index: Int) {
+        updateControl { current ->
+            if (index !in 1..current.flowFrames.lastIndex) {
+                current
+            } else {
+                val frames = current.flowFrames.toMutableList()
+                val previous = frames[index - 1]
+                frames[index - 1] = frames[index]
+                frames[index] = previous
+                current.copy(flowFrames = frames)
+            }
+        }
+    }
+
+    fun moveFlowFrameDown(index: Int) {
+        updateControl { current ->
+            if (index !in 0 until current.flowFrames.lastIndex) {
+                current
+            } else {
+                val frames = current.flowFrames.toMutableList()
+                val next = frames[index + 1]
+                frames[index + 1] = frames[index]
+                frames[index] = next
+                current.copy(flowFrames = frames)
+            }
+        }
+    }
+
+    fun toggleFlowFrameLed(frameIndex: Int, led: Int) {
+        if (frameIndex !in 0 until RgbControlState.MaxFlowFrames || led !in 0..7) return
+        updateControl { current ->
+            val frames = current.flowFrames.toMutableList()
+            while (frames.size <= frameIndex) frames.add(0)
+            frames[frameIndex] = frames[frameIndex] xor (1 shl led)
+            current.copy(flowFrames = frames.take(RgbControlState.MaxFlowFrames))
+        }
+    }
+
+    fun setFlowFrames(frames: List<Int>) {
+        updateControl { it.copy(flowFrames = RgbControlState.sanitizeFlowFrames(frames)) }
     }
 
     fun setAutoSend(enabled: Boolean) {
@@ -257,7 +328,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         autoSendJob?.cancel()
         val state = uiState.value
         if (!state.autoSendEnabled ||
-            !state.orderValid ||
+            !state.flowFramesValid ||
             state.bluetooth.connectionState != BluetoothConnectionState.Connected
         ) {
             return
@@ -270,8 +341,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun sendFrame(frame: RgbFrame, source: String) {
         val state = uiState.value
-        if (!RgbFrameBuilder.isValidOrder(frame.order)) {
-            manualState.update { it.copy(errorMessage = "流水灯序无效：请按顺序点满 8 个灯。") }
+        if (!RgbFrameBuilder.isValidFlowFrames(frame.flowFrames)) {
+            manualState.update { it.copy(errorMessage = "流水画面无效：画面数量必须为 1..8。") }
             return
         }
 

@@ -116,6 +116,7 @@ class AppStorage(
                 .put("brightness", control.brightness.coerceIn(0, 255))
                 .put("period", control.period.coerceIn(1, 255))
                 .put("order", JSONArray(control.order))
+                .put("flowFrames", JSONArray(control.flowFrames.map { it.coerceIn(0, 255) }))
 
         private fun jsonToControl(json: JSONObject): RgbControlState {
             val orderJson = json.optJSONArray("order")
@@ -124,6 +125,13 @@ class AppStorage(
             } else {
                 List(orderJson.length()) { index -> orderJson.optInt(index, -1) }
             }
+            val flowFramesJson = json.optJSONArray("flowFrames")
+            val flowFrames = if (flowFramesJson == null) {
+                // 兼容旧版预设：旧灯序在新版协议中转换为单 bit 流水画面。
+                RgbControlState.orderToFlowFrames(order)
+            } else {
+                List(flowFramesJson.length()) { index -> flowFramesJson.optInt(index, 0) }
+            }
             return RgbControlState(
                 mode = ControlMode.fromWireValue(json.optInt("mode", ControlMode.Flow.wireValue)),
                 red = json.optInt("red", 0),
@@ -131,7 +139,8 @@ class AppStorage(
                 blue = json.optInt("blue", 0),
                 brightness = json.optInt("brightness", 17),
                 period = json.optInt("period", 20),
-                order = order
+                order = order,
+                flowFrames = flowFrames
             ).clamped()
         }
 

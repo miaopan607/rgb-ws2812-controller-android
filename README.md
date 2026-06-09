@@ -1,12 +1,12 @@
 # RGB WS2812 Controller Android
 
-这是一个原生 Android 控制 App，用经典蓝牙 SPP 串口向 FPGA WS2812 彩灯板发送固定 17 字节二进制控制帧。
+这是一个原生 Android 控制 App，用经典蓝牙 SPP 串口向 FPGA WS2812 彩灯板发送可变长度二进制控制帧。
 
 ## 功能
 
 - Kotlin + Jetpack Compose + Material 3 界面。
 - 支持静态、流水、呼吸、渐变 4 种模式。
-- 支持 RGB、亮度、呼吸周期、流水顺序编辑。
+- 支持 RGB、亮度、呼吸周期、基础流水顺序和高级流水画面编辑。
 - 支持已配对设备列表、蓝牙扫描发现、SPP 连接和发送。
 - 支持 Hex 预览、复制、手动 Hex 校验发送。
 - 支持预设、发送历史、JSON 导入导出。
@@ -14,13 +14,13 @@
 
 ## 协议
 
-每次发送完整 17 字节二进制帧，不发送 ASCII Hex：
+每次发送完整 `11~18` 字节二进制帧，不发送 ASCII Hex：
 
 ```text
-AA 55 mode R G B brightness period order0 order1 order2 order3 order4 order5 order6 order7 checksum
+AA 55 mode R G B brightness period flow_count frame0 ... frameN checksum
 ```
 
-`checksum` 是从 `mode` 到 `order7` 共 14 字节逐字节 XOR。流水灯序必须是 `0..7` 的不重复排列。
+`checksum` 是从 `mode` 到最后一个 `frame` 逐字节 XOR。`flow_count` 为 `1..8`，每个 `frame` 是 1 字节灯掩码，bit0~bit7 对应 LED0~LED7。基础流水会自动转换成单 bit 画面，高级流水允许一个画面同时点亮多颗灯。
 
 ## 构建
 

@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -103,6 +104,7 @@ import com.rgbws2812.controller.model.Preset
 import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.SendHistoryItem
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
+import com.rgbws2812.controller.protocol.toHexByte
 import com.rgbws2812.controller.ui.theme.RgbControllerTheme
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -113,10 +115,12 @@ import kotlin.math.roundToInt
 private const val MaxInlineDevices = 8
 private const val MaxInlinePresets = 8
 private const val MaxInlineHistory = 12
+private val FlowEditorGridMaxWidth = 480.dp
 
 private val DisplayToHardwareOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
 private val WorkbenchTabs = listOf("预设", "历史", "导入导出")
 private val BluetoothTabs = listOf("扫描发现", "已配对")
+private val FlowEditorTabs = listOf("基础流水", "高级画面")
 private data class PaletteColor(val label: String, val red: Int, val green: Int, val blue: Int)
 
 private data class HsvColor(val hue: Float, val saturation: Float, val value: Float)
@@ -246,6 +250,12 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                 onPeriod = { viewModel.updatePeriod(it) },
                 onToggleLed = { viewModel.toggleOrderLed(it) },
                 onOrder = { viewModel.setOrder(it) },
+                onToggleFlowFrameLed = { frameIndex, led -> viewModel.toggleFlowFrameLed(frameIndex, led) },
+                onFlowFrames = { viewModel.setFlowFrames(it) },
+                onAddFlowFrame = { viewModel.addFlowFrame() },
+                onDeleteFlowFrame = { viewModel.deleteFlowFrame(it) },
+                onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
+                onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
                 onAutoSend = { viewModel.setAutoSend(it) },
                 onSend = { viewModel.sendCurrent() },
                 onManualHex = { viewModel.updateManualHex(it) },
@@ -302,6 +312,12 @@ private fun ControllerPage(
     onPeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
+    onToggleFlowFrameLed: (Int, Int) -> Unit,
+    onFlowFrames: (List<Int>) -> Unit,
+    onAddFlowFrame: () -> Unit,
+    onDeleteFlowFrame: (Int) -> Unit,
+    onMoveFlowFrameUp: (Int) -> Unit,
+    onMoveFlowFrameDown: (Int) -> Unit,
     onAutoSend: (Boolean) -> Unit,
     onSend: () -> Unit,
     onManualHex: (String) -> Unit,
@@ -336,6 +352,12 @@ private fun ControllerPage(
                 onPeriod = onPeriod,
                 onToggleLed = onToggleLed,
                 onOrder = onOrder,
+                onToggleFlowFrameLed = onToggleFlowFrameLed,
+                onFlowFrames = onFlowFrames,
+                onAddFlowFrame = onAddFlowFrame,
+                onDeleteFlowFrame = onDeleteFlowFrame,
+                onMoveFlowFrameUp = onMoveFlowFrameUp,
+                onMoveFlowFrameDown = onMoveFlowFrameDown,
                 onAutoSend = onAutoSend
             )
         }
@@ -644,6 +666,12 @@ private fun ControlSection(
     onPeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
+    onToggleFlowFrameLed: (Int, Int) -> Unit,
+    onFlowFrames: (List<Int>) -> Unit,
+    onAddFlowFrame: () -> Unit,
+    onDeleteFlowFrame: (Int) -> Unit,
+    onMoveFlowFrameUp: (Int) -> Unit,
+    onMoveFlowFrameDown: (Int) -> Unit,
     onAutoSend: (Boolean) -> Unit
 ) {
     AppCard(title = "控制参数") {
@@ -679,8 +707,15 @@ private fun ControlSection(
         if (state.mode == ControlMode.Flow) {
             FlowOrderEditor(
                 order = state.order,
+                flowFrames = state.flowFrames,
                 onToggleLed = onToggleLed,
-                onOrder = onOrder
+                onOrder = onOrder,
+                onToggleFlowFrameLed = onToggleFlowFrameLed,
+                onFlowFrames = onFlowFrames,
+                onAddFlowFrame = onAddFlowFrame,
+                onDeleteFlowFrame = onDeleteFlowFrame,
+                onMoveFlowFrameUp = onMoveFlowFrameUp,
+                onMoveFlowFrameDown = onMoveFlowFrameDown
             )
         }
         Divider(modifier = Modifier.padding(vertical = 12.dp))
@@ -876,6 +911,66 @@ private fun ExpandCollapseIcon(expanded: Boolean, modifier: Modifier = Modifier,
             drawLine(color, Offset(left, top), Offset(middle, bottom), strokeWidth = stroke)
             drawLine(color, Offset(middle, bottom), Offset(right, top), strokeWidth = stroke)
         }
+    }
+}
+
+@Composable
+private fun AddFrameIcon(modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val stroke = 2.dp.toPx()
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.5f, size.height * 0.2f),
+            end = Offset(size.width * 0.5f, size.height * 0.8f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.2f, size.height * 0.5f),
+            end = Offset(size.width * 0.8f, size.height * 0.5f),
+            strokeWidth = stroke
+        )
+    }
+}
+
+@Composable
+private fun MoveFrameIcon(up: Boolean, modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val stroke = 2.dp.toPx()
+        val top = size.height * 0.22f
+        val middle = size.height * 0.48f
+        val bottom = size.height * 0.78f
+        val left = size.width * 0.28f
+        val centerX = size.width * 0.5f
+        val right = size.width * 0.72f
+
+        if (up) {
+            drawLine(color, Offset(centerX, top), Offset(centerX, bottom), strokeWidth = stroke)
+            drawLine(color, Offset(left, middle), Offset(centerX, top), strokeWidth = stroke)
+            drawLine(color, Offset(centerX, top), Offset(right, middle), strokeWidth = stroke)
+        } else {
+            drawLine(color, Offset(centerX, top), Offset(centerX, bottom), strokeWidth = stroke)
+            drawLine(color, Offset(left, middle), Offset(centerX, bottom), strokeWidth = stroke)
+            drawLine(color, Offset(centerX, bottom), Offset(right, middle), strokeWidth = stroke)
+        }
+    }
+}
+
+@Composable
+private fun DeleteFrameIcon(modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        val left = size.width * 0.28f
+        val right = size.width * 0.72f
+        val top = size.height * 0.34f
+        val bottom = size.height * 0.82f
+
+        drawLine(color, Offset(left, top), Offset(right, top), strokeWidth = stroke)
+        drawLine(color, Offset(size.width * 0.38f, size.height * 0.22f), Offset(size.width * 0.62f, size.height * 0.22f), strokeWidth = stroke)
+        drawLine(color, Offset(size.width * 0.46f, size.height * 0.18f), Offset(size.width * 0.54f, size.height * 0.18f), strokeWidth = stroke)
+        drawLine(color, Offset(left + stroke, top), Offset(left + stroke * 1.8f, bottom), strokeWidth = stroke)
+        drawLine(color, Offset(right - stroke, top), Offset(right - stroke * 1.8f, bottom), strokeWidth = stroke)
+        drawLine(color, Offset(left + stroke * 1.8f, bottom), Offset(right - stroke * 1.8f, bottom), strokeWidth = stroke)
     }
 }
 
@@ -1253,35 +1348,87 @@ private fun NumberSlider(
 @Composable
 private fun FlowOrderEditor(
     order: List<Int>,
+    flowFrames: List<Int>,
+    onToggleLed: (Int) -> Unit,
+    onOrder: (List<Int>) -> Unit,
+    onToggleFlowFrameLed: (Int, Int) -> Unit,
+    onFlowFrames: (List<Int>) -> Unit,
+    onAddFlowFrame: () -> Unit,
+    onDeleteFlowFrame: (Int) -> Unit,
+    onMoveFlowFrameUp: (Int) -> Unit,
+    onMoveFlowFrameDown: (Int) -> Unit
+) {
+    var selectedTab by remember { mutableStateOf(0) }
+
+    Spacer(modifier = Modifier.height(12.dp))
+    TabRow(selectedTabIndex = selectedTab) {
+        FlowEditorTabs.forEachIndexed { index, title ->
+            Tab(
+                selected = selectedTab == index,
+                onClick = { selectedTab = index },
+                text = { Text(title) }
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+
+    if (selectedTab == 0) {
+        BasicFlowOrderEditor(
+            order = order,
+            onToggleLed = onToggleLed,
+            onOrder = onOrder
+        )
+    } else {
+        AdvancedFlowFrameEditor(
+            order = order,
+            flowFrames = flowFrames,
+            onToggleFlowFrameLed = onToggleFlowFrameLed,
+            onFlowFrames = onFlowFrames,
+            onAddFlowFrame = onAddFlowFrame,
+            onDeleteFlowFrame = onDeleteFlowFrame,
+            onMoveFlowFrameUp = onMoveFlowFrameUp,
+            onMoveFlowFrameDown = onMoveFlowFrameDown
+        )
+    }
+}
+
+@Composable
+private fun BasicFlowOrderEditor(
+    order: List<Int>,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit
 ) {
-    Spacer(modifier = Modifier.height(12.dp))
-    Text("流水灯序", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        DisplayToHardwareOrder.chunked(4).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                row.forEach { led ->
-                    val step = order.indexOf(led).takeIf { it >= 0 }?.plus(1)
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .aspectRatio(1.35f)
-                            .clickable { onToggleLed(led) },
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
-                        color = if (step != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(8.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = FlowEditorGridMaxWidth)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DisplayToHardwareOrder.chunked(4).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    row.forEach { led ->
+                        val step = order.indexOf(led).takeIf { it >= 0 }?.plus(1)
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1.35f)
+                                .clickable { onToggleLed(led) },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+                            color = if (step != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
                         ) {
-                            Text(
-                                text = step?.toString().orEmpty(),
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = step?.toString().orEmpty(),
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -1297,18 +1444,118 @@ private fun FlowOrderEditor(
     }
     Spacer(modifier = Modifier.height(6.dp))
     Text(
-        "按想要的流水顺序点击灯块；页面显示 1~8，发送时自动转换为协议需要的 0~7。",
+        "基础流水会转换为每个画面只亮一颗灯的新版协议。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     if (!RgbFrameBuilder.isValidOrder(order)) {
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            "流水灯序无效：请按顺序点满 8 个灯。",
+            "基础流水灯序未点满；高级画面仍可发送，或点击“用基础灯序生成”。",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+@Composable
+private fun AdvancedFlowFrameEditor(
+    order: List<Int>,
+    flowFrames: List<Int>,
+    onToggleFlowFrameLed: (Int, Int) -> Unit,
+    onFlowFrames: (List<Int>) -> Unit,
+    onAddFlowFrame: () -> Unit,
+    onDeleteFlowFrame: (Int) -> Unit,
+    onMoveFlowFrameUp: (Int) -> Unit,
+    onMoveFlowFrameDown: (Int) -> Unit
+) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { onFlowFrames(RgbFrameBuilder.orderToFlowFrames(order)) }) { Text("用基础灯序生成") }
+        OutlinedButton(onClick = { onFlowFrames(List(RgbControlState.MaxFlowFrames) { 0xFF }) }) { Text("全亮") }
+        OutlinedButton(onClick = { onFlowFrames(List(RgbControlState.MaxFlowFrames) { 0x00 }) }) { Text("全灭") }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    flowFrames.forEachIndexed { frameIndex, mask ->
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+        ) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("画面 ${frameIndex + 1}", fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(mask.coerceIn(0, 255).toHexByte(), fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        IconButton(
+                            enabled = frameIndex > 0,
+                            onClick = { onMoveFlowFrameUp(frameIndex) }
+                        ) {
+                            MoveFrameIcon(up = true, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                        }
+                        IconButton(
+                            enabled = frameIndex < flowFrames.lastIndex,
+                            onClick = { onMoveFlowFrameDown(frameIndex) }
+                        ) {
+                            MoveFrameIcon(up = false, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                        }
+                        IconButton(
+                            enabled = flowFrames.size > 1,
+                            onClick = { onDeleteFlowFrame(frameIndex) }
+                        ) {
+                            DeleteFrameIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Column(
+                        modifier = Modifier
+                            .widthIn(max = FlowEditorGridMaxWidth)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        DisplayToHardwareOrder.chunked(4).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                row.forEach { led ->
+                                    val selected = (mask and (1 shl led)) != 0
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(40.dp)
+                                            .clickable { onToggleFlowFrameLed(frameIndex, led) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+                                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text((DisplayToHardwareOrder.indexOf(led) + 1).toString(), fontWeight = FontWeight.SemiBold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (flowFrames.size < RgbControlState.MaxFlowFrames) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            OutlinedButton(onClick = onAddFlowFrame) {
+                AddFrameIcon(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("添加画面")
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        "每个画面是 1 字节灯掩码，可同时点亮多颗灯；画面数量范围 1~8。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 @Composable
@@ -1321,7 +1568,7 @@ private fun FrameSection(
 ) {
     val clipboard = LocalClipboardManager.current
     AppCard(title = "帧与发送") {
-        Text("当前 17 字节帧", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text("当前 ${state.frame.bytes.size} 字节帧", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
@@ -1335,10 +1582,10 @@ private fun FrameSection(
                 style = MaterialTheme.typography.titleMedium
             )
         }
-        if (!state.orderValid) {
+        if (!state.flowFramesValid) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "流水灯序无效：请按顺序点满 8 个灯。",
+                "流水画面无效：画面数量必须为 1..8。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
             )
@@ -1346,15 +1593,15 @@ private fun FrameSection(
         Spacer(modifier = Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                enabled = state.orderValid && state.bluetooth.connectionState == BluetoothConnectionState.Connected,
+                enabled = state.flowFramesValid && state.bluetooth.connectionState == BluetoothConnectionState.Connected,
                 onClick = onSend
             ) { Text("发送当前帧") }
             OutlinedButton(
-                enabled = state.orderValid,
+                enabled = state.flowFramesValid,
                 onClick = { clipboard.setText(AnnotatedString(state.frame.spacedHex())) }
             ) { Text("复制 Hex") }
             OutlinedButton(
-                enabled = state.orderValid,
+                enabled = state.flowFramesValid,
                 onClick = { clipboard.setText(AnnotatedString(state.frame.compactHex())) }
             ) { Text("复制紧凑") }
         }
@@ -1369,7 +1616,7 @@ private fun FrameSection(
                 .fillMaxWidth()
                 .heightIn(min = 92.dp),
             minLines = 3,
-            label = { Text("17 字节 Hex") }
+            label = { Text("${RgbFrameBuilder.MinFrameLength}..${RgbFrameBuilder.MaxFrameLength} 字节 Hex") }
         )
         Spacer(modifier = Modifier.height(8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1393,7 +1640,7 @@ private fun ByteTable(frameHex: String) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(index.toString().padStart(2, '0'), modifier = Modifier.width(32.dp), fontFamily = FontFamily.Monospace)
-                Text(RgbFrameBuilder.ByteLabels[index], modifier = Modifier.width(58.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(RgbFrameBuilder.byteLabel(index, values.size), modifier = Modifier.width(58.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(value, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
             }
         }

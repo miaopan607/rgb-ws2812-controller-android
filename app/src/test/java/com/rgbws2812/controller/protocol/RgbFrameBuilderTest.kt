@@ -18,15 +18,16 @@ class RgbFrameBuilderTest {
                 blue = 0,
                 brightness = 128,
                 period = 20,
-                order = listOf(0, 1, 2, 3, 4, 5, 6, 7)
+                flowFrames = listOf(0x08, 0x04, 0x02, 0x01, 0x10, 0x20, 0x40, 0x80)
             )
         )
 
-        assertEquals("AA 55 00 FF 00 00 80 14 00 01 02 03 04 05 06 07 6B", frame.spacedHex())
+        assertEquals("AA 55 00 FF 00 00 80 14 08 08 04 02 01 10 20 40 80 9C", frame.spacedHex())
     }
 
     @Test
-    fun flowGreenExampleMatchesProtocolDocument() {
+    fun basicFlowOrderConvertsToSingleBitFrames() {
+        val frames = RgbFrameBuilder.orderToFlowFrames(listOf(0, 1, 2, 3, 4, 5, 6, 7))
         val frame = RgbFrameBuilder.build(
             RgbControlState(
                 mode = ControlMode.Flow,
@@ -35,49 +36,64 @@ class RgbFrameBuilderTest {
                 blue = 0,
                 brightness = 96,
                 period = 20,
-                order = listOf(0, 1, 2, 3, 4, 5, 6, 7)
+                order = listOf(0, 1, 2, 3, 4, 5, 6, 7),
+                flowFrames = frames
             )
         )
 
-        assertEquals("AA 55 01 00 FF 00 60 14 00 01 02 03 04 05 06 07 8A", frame.spacedHex())
+        assertEquals(listOf(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80), frame.flowFrames)
+        assertEquals("AA 55 01 00 FF 00 60 14 08 01 02 04 08 10 20 40 80 7D", frame.spacedHex())
     }
 
     @Test
-    fun parsesCompactAndSpacedHex() {
-        val spaced = RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 00 01 02 03 04 05 06 07 57")
-        val compact = RgbFrameBuilder.parseHex("AA55030000004014000102030405060757")
+    fun advancedFlowCanLightMultipleLedsPerFrame() {
+        val frame = RgbFrameBuilder.build(
+            RgbControlState.Default.copy(
+                mode = ControlMode.Flow,
+                brightness = 96,
+                flowFrames = listOf(0x03, 0x0C, 0x30, 0xC0)
+            )
+        )
+
+        assertEquals("AA 55 01 00 FF 00 60 14 04 03 0C 30 C0 71", frame.spacedHex())
+        assertEquals(4, frame.flowCount)
+    }
+
+    @Test
+    fun parsesCompactAndSpacedVariableLengthHex() {
+        val spaced = RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 08 08 04 02 01 10 20 40 80 A0")
+        val compact = RgbFrameBuilder.parseHex("AA55030000004014080804020110204080A0")
 
         assertEquals(spaced.spacedHex(), compact.spacedHex())
         assertEquals(ControlMode.Gradient, spaced.mode)
-    }
-
-    @Test
-    fun buildsFrameForIncompleteOrderLikeReferenceHtml() {
-        val frame = RgbFrameBuilder.build(
-            RgbControlState.Default.copy(order = emptyList())
-        )
-
-        assertEquals("AA 55 01 00 FF 00 11 14 00 00 00 00 00 00 00 00 FB", frame.spacedHex())
-        assertFalse(RgbFrameBuilder.isValidOrder(frame.order))
-    }
-
-    @Test
-    fun buildsFrameForDuplicateOrderButMarksItInvalid() {
-        val frame = RgbFrameBuilder.build(
-            RgbControlState.Default.copy(order = listOf(0, 0, 1, 2, 3, 4, 5, 6))
-        )
-
-        assertEquals(listOf(0, 1, 2, 3, 4, 5, 6, 0), frame.order)
-        assertFalse(RgbFrameBuilder.isValidOrder(frame.order))
+        assertEquals(listOf(0x08, 0x04, 0x02, 0x01, 0x10, 0x20, 0x40, 0x80), spaced.flowFrames)
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsBadChecksum() {
-        RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 00 01 02 03 04 05 06 07 00")
+        RgbFrameBuilder.parseHex("AA 55 03 00 00 00 40 14 08 08 04 02 01 10 20 40 80 00")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsZeroFlowCount() {
+        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 14 00 00 00")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsFlowCountAboveLimit() {
+        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 14 09 01 02 04 08 10 20 40 80 7C")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsLengthThatDoesNotMatchFlowCount() {
+        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 14 08 01 02 04 08 10 20 40 FD")
     }
 
     @Test
-    fun validatesFullOrderPermutation() {
-        assertTrue(RgbFrameBuilder.isValidOrder(listOf(3, 2, 1, 0, 4, 5, 6, 7)))
+    fun validatesFlowFramesInsteadOfRequiringFullBasicOrder() {
+        assertTrue(RgbFrameBuilder.isValidFlowFrames(listOf(0x00)))
+        assertTrue(RgbFrameBuilder.isValidFlowFrames(listOf(0x03, 0x0C)))
+        assertFalse(RgbFrameBuilder.isValidFlowFrames(emptyList()))
+        assertFalse(RgbFrameBuilder.isValidFlowFrames(List(9) { 0 }))
     }
 }
