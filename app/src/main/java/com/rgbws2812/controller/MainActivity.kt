@@ -960,17 +960,45 @@ private fun MoveFrameIcon(up: Boolean, modifier: Modifier = Modifier, color: Col
 private fun DeleteFrameIcon(modifier: Modifier = Modifier, color: Color) {
     Canvas(modifier = modifier) {
         val stroke = 1.8.dp.toPx()
-        val left = size.width * 0.28f
-        val right = size.width * 0.72f
-        val top = size.height * 0.34f
-        val bottom = size.height * 0.82f
+        val handleLeft = size.width * 0.4f
+        val handleTop = size.height * 0.16f
+        val handleWidth = size.width * 0.2f
+        val handleHeight = size.height * 0.1f
+        val lidY = size.height * 0.3f
+        val lidLeft = size.width * 0.22f
+        val lidRight = size.width * 0.78f
+        val bodyLeft = size.width * 0.3f
+        val bodyTop = size.height * 0.36f
+        val bodyWidth = size.width * 0.4f
+        val bodyHeight = size.height * 0.46f
 
-        drawLine(color, Offset(left, top), Offset(right, top), strokeWidth = stroke)
-        drawLine(color, Offset(size.width * 0.38f, size.height * 0.22f), Offset(size.width * 0.62f, size.height * 0.22f), strokeWidth = stroke)
-        drawLine(color, Offset(size.width * 0.46f, size.height * 0.18f), Offset(size.width * 0.54f, size.height * 0.18f), strokeWidth = stroke)
-        drawLine(color, Offset(left + stroke, top), Offset(left + stroke * 1.8f, bottom), strokeWidth = stroke)
-        drawLine(color, Offset(right - stroke, top), Offset(right - stroke * 1.8f, bottom), strokeWidth = stroke)
-        drawLine(color, Offset(left + stroke * 1.8f, bottom), Offset(right - stroke * 1.8f, bottom), strokeWidth = stroke)
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(handleLeft, handleTop),
+            size = androidx.compose.ui.geometry.Size(handleWidth, handleHeight),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawLine(color, Offset(lidLeft, lidY), Offset(lidRight, lidY), strokeWidth = stroke)
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(bodyLeft, bodyTop),
+            size = androidx.compose.ui.geometry.Size(bodyWidth, bodyHeight),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.43f, size.height * 0.44f),
+            end = Offset(size.width * 0.43f, size.height * 0.74f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.57f, size.height * 0.44f),
+            end = Offset(size.width * 0.57f, size.height * 0.74f),
+            strokeWidth = stroke
+        )
     }
 }
 
