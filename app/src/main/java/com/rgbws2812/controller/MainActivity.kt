@@ -32,6 +32,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -190,6 +191,18 @@ private fun checkMarkColor(red: Int, green: Int, blue: Int): Color {
     val luminance = (0.299f * red + 0.587f * green + 0.114f * blue) / 255f
     return if (luminance > 0.58f) Color.Black else Color.White
 }
+
+@Composable
+private fun connectedStatusColor(): Color =
+    if (isSystemInDarkTheme()) Color(0xFF7DDA9B) else Color(0xFF1B7F45)
+
+@Composable
+private fun frameCodeBlockColor(): Color =
+    if (isSystemInDarkTheme()) Color(0xFF0B1220) else Color(0xFF111827)
+
+@Composable
+private fun frameCodeTextColor(): Color =
+    if (isSystemInDarkTheme()) Color(0xFFA7F3D0) else Color(0xFFD1FAE5)
 
 private enum class AppPage {
     Controller,
@@ -820,7 +833,7 @@ private fun ControllerTopBar(
                     ),
                     contentDescription = if (connectionState == BluetoothConnectionState.Connected) "蓝牙已连接" else "连接蓝牙设备",
                     tint = if (connectionState == BluetoothConnectionState.Connected) {
-                        Color(0xFF1B7F45)
+                        connectedStatusColor()
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     }
@@ -1069,7 +1082,7 @@ private fun BluetoothStatusPanel(
                     .clip(CircleShape)
                     .background(
                         when (state.connectionState) {
-                            BluetoothConnectionState.Connected -> Color(0xFF1B7F45)
+                            BluetoothConnectionState.Connected -> connectedStatusColor()
                             BluetoothConnectionState.Connecting -> MaterialTheme.colorScheme.tertiary
                             BluetoothConnectionState.Disconnected -> MaterialTheme.colorScheme.outline
                         }
@@ -2177,12 +2190,12 @@ private fun FrameSection(
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
-            color = Color(0xFF111827)
+            color = frameCodeBlockColor()
         ) {
             Text(
                 text = state.frame.spacedHex(),
                 modifier = Modifier.padding(14.dp),
-                color = Color(0xFFD1FAE5),
+                color = frameCodeTextColor(),
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.titleMedium
             )
