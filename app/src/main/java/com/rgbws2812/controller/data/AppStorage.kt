@@ -118,8 +118,12 @@ class AppStorage(
                 .put("order", JSONArray(control.order))
 
         private fun jsonToControl(json: JSONObject): RgbControlState {
-            val orderJson = json.optJSONArray("order") ?: JSONArray(RgbControlState.DefaultOrder)
-            val order = List(orderJson.length()) { index -> orderJson.optInt(index, -1) }
+            val orderJson = json.optJSONArray("order")
+            val order = if (orderJson == null) {
+                RgbControlState.DefaultOrder
+            } else {
+                List(orderJson.length()) { index -> orderJson.optInt(index, -1) }
+            }
             return RgbControlState(
                 mode = ControlMode.fromWireValue(json.optInt("mode", ControlMode.Flow.wireValue)),
                 red = json.optInt("red", 0),
@@ -127,7 +131,7 @@ class AppStorage(
                 blue = json.optInt("blue", 0),
                 brightness = json.optInt("brightness", 17),
                 period = json.optInt("period", 20),
-                order = if (order.size == 8) order else RgbControlState.DefaultOrder
+                order = order
             ).clamped()
         }
 

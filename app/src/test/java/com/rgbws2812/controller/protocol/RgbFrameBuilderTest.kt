@@ -3,6 +3,7 @@ package com.rgbws2812.controller.protocol
 import com.rgbws2812.controller.model.ControlMode
 import com.rgbws2812.controller.model.RgbControlState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,11 +51,24 @@ class RgbFrameBuilderTest {
         assertEquals(ControlMode.Gradient, spaced.mode)
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun rejectsDuplicateOrder() {
-        RgbFrameBuilder.build(
+    @Test
+    fun buildsFrameForIncompleteOrderLikeReferenceHtml() {
+        val frame = RgbFrameBuilder.build(
+            RgbControlState.Default.copy(order = emptyList())
+        )
+
+        assertEquals("AA 55 01 00 FF 00 11 14 00 00 00 00 00 00 00 00 FB", frame.spacedHex())
+        assertFalse(RgbFrameBuilder.isValidOrder(frame.order))
+    }
+
+    @Test
+    fun buildsFrameForDuplicateOrderButMarksItInvalid() {
+        val frame = RgbFrameBuilder.build(
             RgbControlState.Default.copy(order = listOf(0, 0, 1, 2, 3, 4, 5, 6))
         )
+
+        assertEquals(listOf(0, 1, 2, 3, 4, 5, 6, 0), frame.order)
+        assertFalse(RgbFrameBuilder.isValidOrder(frame.order))
     }
 
     @Test(expected = IllegalArgumentException::class)

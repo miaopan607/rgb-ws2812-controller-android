@@ -30,6 +30,7 @@ import java.util.UUID
 data class MainUiState(
     val control: RgbControlState = RgbControlState.Default,
     val frame: RgbFrame = RgbFrameBuilder.build(RgbControlState.Default),
+    val orderValid: Boolean = true,
     val autoSendEnabled: Boolean = false,
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList(),
@@ -48,11 +49,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val uiState: StateFlow<MainUiState> =
         combine(storage.state, bluetoothClient.state, manualState) { storageState, bluetoothState, manual ->
-            val frame = runCatching { RgbFrameBuilder.build(storageState.control) }
-                .getOrElse { RgbFrameBuilder.build(RgbControlState.Default) }
+            val frame = RgbFrameBuilder.build(storageState.control)
+            val orderValid = RgbFrameBuilder.isValidOrder(storageState.control.order)
             MainUiState(
                 control = storageState.control,
                 frame = frame,
+                orderValid = orderValid,
                 autoSendEnabled = storageState.autoSendEnabled,
                 presets = storageState.presets,
                 history = storageState.history,
@@ -254,7 +256,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun scheduleAutoSend() {
         autoSendJob?.cancel()
         val state = uiState.value
-        if (!state.autoSendEnabled || state.bluetooth.connectionState != BluetoothConnectionState.Connected) {
+        if (!state.autoSendEnabled ||
+            !state.orderValid ||
+            state.bluetooth.connectionState != BluetoothConnectionState.Connected
+        ) {
             return
         }
         autoSendJob = viewModelScope.launch {
@@ -265,6 +270,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun sendFrame(frame: RgbFrame, source: String) {
         val state = uiState.value
+        if (!RgbFrameBuilder.isValidOrder(frame.order)) {
+            manualState.update { it.copy(errorMessage = "流水灯序无效：请按顺序点满 8 个灯。") }
+            return
+        }
+
         if (state.bluetooth.connectionState != BluetoothConnectionState.Connected) {
             manualState.update { it.copy(errorMessage = "请先连接蓝牙设备") }
             return

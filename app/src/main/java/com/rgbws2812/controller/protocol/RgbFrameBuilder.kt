@@ -27,7 +27,7 @@ object RgbFrameBuilder {
 
     fun build(control: RgbControlState): RgbFrame {
         val clean = control.clamped()
-        requireValidOrder(clean.order)
+        val payloadOrder = toPayloadOrder(clean.order)
 
         val payload = listOf(
             clean.mode.wireValue,
@@ -36,7 +36,7 @@ object RgbFrameBuilder {
             clean.blue,
             clean.brightness,
             clean.period
-        ) + clean.order
+        ) + payloadOrder
 
         val checksum = payload.fold(0) { acc, value -> acc xor value }
         val bytes = (listOf(0xAA, 0x55) + payload + checksum)
@@ -50,7 +50,7 @@ object RgbFrameBuilder {
             blue = clean.blue,
             brightness = clean.brightness,
             period = clean.period,
-            order = clean.order,
+            order = payloadOrder,
             checksum = checksum,
             bytes = bytes
         )
@@ -108,6 +108,13 @@ object RgbFrameBuilder {
     fun requireValidOrder(order: List<Int>) {
         require(isValidOrder(order)) { "流水灯序必须包含 0..7 且不能重复" }
     }
+
+    fun toPayloadOrder(order: List<Int>): List<Int> =
+        (0 until 8).map { index ->
+            order.getOrNull(index)
+                ?.takeIf { it in 0..7 }
+                ?: 0
+        }
 }
 
 fun Int.toHexByte(): String = coerceIn(0, 255).toString(16).uppercase().padStart(2, '0')

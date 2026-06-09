@@ -721,7 +721,7 @@ private fun FlowOrderEditor(
     onOrder: (List<Int>) -> Unit
 ) {
     Spacer(modifier = Modifier.height(12.dp))
-    Text("流水顺序", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    Text("流水灯序", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         DisplayToHardwareOrder.chunked(4).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -741,8 +741,11 @@ private fun FlowOrderEditor(
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("LED $led", fontWeight = FontWeight.SemiBold)
-                            Text(step?.let { "第 $it 步" } ?: "未选", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                text = step?.toString().orEmpty(),
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -754,7 +757,21 @@ private fun FlowOrderEditor(
         FlowOrderPresets.forEach { (label, preset) ->
             OutlinedButton(onClick = { onOrder(preset) }) { Text(label) }
         }
-        OutlinedButton(onClick = { onOrder(emptyList()) }) { Text("清空") }
+        OutlinedButton(onClick = { onOrder(emptyList()) }) { Text("清空选择") }
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        "按想要的流水顺序点击灯块；页面显示 1~8，发送时自动转换为协议需要的 0~7。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (!RgbFrameBuilder.isValidOrder(order)) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "流水灯序无效：请按顺序点满 8 个灯。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error
+        )
     }
 }
 
@@ -782,14 +799,28 @@ private fun FrameSection(
                 style = MaterialTheme.typography.titleMedium
             )
         }
+        if (!state.orderValid) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "流水灯序无效：请按顺序点满 8 个灯。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
         Spacer(modifier = Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                enabled = state.bluetooth.connectionState == BluetoothConnectionState.Connected,
+                enabled = state.orderValid && state.bluetooth.connectionState == BluetoothConnectionState.Connected,
                 onClick = onSend
             ) { Text("发送当前帧") }
-            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(state.frame.spacedHex())) }) { Text("复制 Hex") }
-            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(state.frame.compactHex())) }) { Text("复制紧凑") }
+            OutlinedButton(
+                enabled = state.orderValid,
+                onClick = { clipboard.setText(AnnotatedString(state.frame.spacedHex())) }
+            ) { Text("复制 Hex") }
+            OutlinedButton(
+                enabled = state.orderValid,
+                onClick = { clipboard.setText(AnnotatedString(state.frame.compactHex())) }
+            ) { Text("复制紧凑") }
         }
         Spacer(modifier = Modifier.height(14.dp))
         ByteTable(frameHex = state.frame.spacedHex())
