@@ -38,9 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -89,6 +87,26 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private const val MaxInlineDevices = 8
+private const val MaxInlinePresets = 8
+private const val MaxInlineHistory = 12
+
+private val DisplayToHardwareOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
+private val WorkbenchTabs = listOf("预设", "历史", "导入导出")
+private val QuickColors = listOf(
+    "红" to Triple(255, 0, 0),
+    "绿" to Triple(0, 255, 0),
+    "蓝" to Triple(0, 0, 255),
+    "白" to Triple(255, 255, 255),
+    "暖" to Triple(255, 160, 64)
+)
+private val FlowOrderPresets = listOf(
+    "正序" to listOf(3, 2, 1, 0, 4, 5, 6, 7),
+    "反序" to listOf(7, 6, 5, 4, 0, 1, 2, 3),
+    "先偶后奇" to listOf(3, 1, 4, 6, 2, 0, 5, 7),
+    "交错" to listOf(3, 4, 2, 5, 1, 6, 0, 7)
+)
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -300,8 +318,9 @@ private fun DeviceList(
         Text("暂无设备", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         return
     }
+    val visibleDevices = remember(devices) { devices.take(MaxInlineDevices) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        devices.forEach { device ->
+        visibleDevices.forEach { device ->
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -326,6 +345,13 @@ private fun DeviceList(
                     }
                 }
             }
+        }
+        if (devices.size > MaxInlineDevices) {
+            Text(
+                "还有 ${devices.size - MaxInlineDevices} 个设备未展开，继续扫描或刷新后可按名称识别",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -415,13 +441,7 @@ private fun ColorControls(
     NumberSlider("G", state.green, 0..255) { onColor(state.red, it, state.blue) }
     NumberSlider("B", state.blue, 0..255) { onColor(state.red, state.green, it) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(
-            "红" to Triple(255, 0, 0),
-            "绿" to Triple(0, 255, 0),
-            "蓝" to Triple(0, 0, 255),
-            "白" to Triple(255, 255, 255),
-            "暖" to Triple(255, 160, 64)
-        ).forEach { (label, rgb) ->
+        QuickColors.forEach { (label, rgb) ->
             OutlinedButton(onClick = { onColor(rgb.first, rgb.second, rgb.third) }) {
                 Text(label)
             }
@@ -463,9 +483,8 @@ private fun FlowOrderEditor(
 ) {
     Spacer(modifier = Modifier.height(12.dp))
     Text("流水顺序", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-    val displayToHardware = listOf(3, 2, 1, 0, 4, 5, 6, 7)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        displayToHardware.chunked(4).forEach { row ->
+        DisplayToHardwareOrder.chunked(4).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 row.forEach { led ->
                     val step = order.indexOf(led).takeIf { it >= 0 }?.plus(1)
@@ -493,12 +512,7 @@ private fun FlowOrderEditor(
     }
     Spacer(modifier = Modifier.height(10.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        mapOf(
-            "正序" to listOf(3, 2, 1, 0, 4, 5, 6, 7),
-            "反序" to listOf(7, 6, 5, 4, 0, 1, 2, 3),
-            "先偶后奇" to listOf(3, 1, 4, 6, 2, 0, 5, 7),
-            "交错" to listOf(3, 4, 2, 5, 1, 6, 0, 7)
-        ).forEach { (label, preset) ->
+        FlowOrderPresets.forEach { (label, preset) ->
             OutlinedButton(onClick = { onOrder(preset) }) { Text(label) }
         }
         OutlinedButton(onClick = { onOrder(emptyList()) }) { Text("清空") }
@@ -564,7 +578,7 @@ private fun FrameSection(
 
 @Composable
 private fun ByteTable(frameHex: String) {
-    val values = frameHex.split(" ")
+    val values = remember(frameHex) { frameHex.split(" ") }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         values.forEachIndexed { index, value ->
             Row(
@@ -594,10 +608,9 @@ private fun WorkbenchSection(
     onImport: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("预设", "历史", "导入导出")
     AppCard(title = "工作台") {
         TabRow(selectedTabIndex = selectedTab) {
-            tabs.forEachIndexed { index, title ->
+            WorkbenchTabs.forEachIndexed { index, title ->
                 Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) })
             }
         }
@@ -653,12 +666,20 @@ private fun PresetPanel(
     if (presets.isEmpty()) {
         Text("暂无预设", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    presets.forEach { preset ->
+    val visiblePresets = remember(presets) { presets.take(MaxInlinePresets) }
+    visiblePresets.forEach { preset ->
         PresetRow(
             preset = preset,
             onLoad = { onLoadPreset(preset) },
             onRename = { onRenamePreset(preset, it) },
             onDelete = { onDeletePreset(preset) }
+        )
+    }
+    if (presets.size > MaxInlinePresets) {
+        Text(
+            "还有 ${presets.size - MaxInlinePresets} 个预设未显示，导出 JSON 可查看完整列表",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
         )
     }
 }
@@ -717,7 +738,8 @@ private fun HistoryPanel(
     if (history.isEmpty()) {
         Text("暂无发送历史", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    history.forEach { item ->
+    val visibleHistory = remember(history) { history.take(MaxInlineHistory) }
+    visibleHistory.forEach { item ->
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -732,6 +754,13 @@ private fun HistoryPanel(
                 OutlinedButton(onClick = { onResendHistory(item) }) { Text("重发") }
             }
         }
+    }
+    if (history.size > MaxInlineHistory) {
+        Text(
+            "还有 ${history.size - MaxInlineHistory} 条历史未显示，导出 JSON 可查看完整列表",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -760,12 +789,13 @@ private fun ImportExportPanel(
 
 @Composable
 private fun AppCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    ElevatedCard(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
