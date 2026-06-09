@@ -8,6 +8,7 @@ package com.rgbws2812.controller
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -18,8 +19,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -73,13 +77,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -96,6 +108,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private const val MaxInlineDevices = 8
 private const val MaxInlinePresets = 8
@@ -104,12 +117,14 @@ private const val MaxInlineHistory = 12
 private val DisplayToHardwareOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
 private val WorkbenchTabs = listOf("预设", "历史", "导入导出")
 private val BluetoothTabs = listOf("扫描发现", "已配对")
-private val QuickColors = listOf(
-    "红" to Triple(255, 0, 0),
-    "绿" to Triple(0, 255, 0),
-    "蓝" to Triple(0, 0, 255),
-    "白" to Triple(255, 255, 255),
-    "暖" to Triple(255, 160, 64)
+private data class PaletteColor(val label: String, val red: Int, val green: Int, val blue: Int)
+
+private data class HsvColor(val hue: Float, val saturation: Float, val value: Float)
+
+private val BasicColors = listOf(
+    PaletteColor("红", 255, 0, 0),
+    PaletteColor("绿", 0, 255, 0),
+    PaletteColor("蓝", 0, 0, 255)
 )
 private val FlowOrderPresets = listOf(
     "正序" to listOf(3, 2, 1, 0, 4, 5, 6, 7),
@@ -117,6 +132,30 @@ private val FlowOrderPresets = listOf(
     "先偶后奇" to listOf(3, 1, 4, 6, 2, 0, 5, 7),
     "交错" to listOf(3, 4, 2, 5, 1, 6, 0, 7)
 )
+
+private fun rgbToHsv(red: Int, green: Int, blue: Int): HsvColor {
+    val hsv = FloatArray(3)
+    AndroidColor.RGBToHSV(red, green, blue, hsv)
+    return HsvColor(hsv[0], hsv[1], hsv[2])
+}
+
+private fun hsvToRgb(hue: Float, saturation: Float, value: Float): Triple<Int, Int, Int> {
+    val color = AndroidColor.HSVToColor(floatArrayOf(hue.coerceIn(0f, 360f), saturation.coerceIn(0f, 1f), value.coerceIn(0f, 1f)))
+    return Triple(AndroidColor.red(color), AndroidColor.green(color), AndroidColor.blue(color))
+}
+
+private fun colorForHue(hue: Float): Color {
+    val rgb = hsvToRgb(hue, 1f, 1f)
+    return Color(rgb.first, rgb.second, rgb.third)
+}
+
+private fun isBasicPaletteColor(red: Int, green: Int, blue: Int): Boolean =
+    BasicColors.any { it.red == red && it.green == green && it.blue == blue }
+
+private fun checkMarkColor(red: Int, green: Int, blue: Int): Color {
+    val luminance = (0.299f * red + 0.587f * green + 0.114f * blue) / 255f
+    return if (luminance > 0.58f) Color.Black else Color.White
+}
 
 private enum class AppPage {
     Controller,
@@ -660,32 +699,545 @@ private fun ColorControls(
     state: RgbControlState,
     onColor: (Int, Int, Int) -> Unit
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(Color(state.red, state.green, state.blue))
+    var advancedExpanded by remember { mutableStateOf(false) }
+    var customSelected by remember { mutableStateOf(!isBasicPaletteColor(state.red, state.green, state.blue)) }
+    var customPanelExpanded by remember { mutableStateOf(false) }
+    var rememberedCustomColor by remember { mutableStateOf(Triple(state.red, state.green, state.blue).takeUnless { isBasicPaletteColor(it.first, it.second, it.third) } ?: Triple(255, 160, 64)) }
+    val updateCustomColor: (Int, Int, Int) -> Unit = { red, green, blue ->
+        rememberedCustomColor = Triple(red, green, blue)
+        onColor(red, green, blue)
+    }
+    val hsv = rgbToHsv(state.red, state.green, state.blue)
+    val displayHue = if (hsv.saturation == 0f && hsv.value == 0f) 0f else hsv.hue
+    val hueColor = colorForHue(displayHue)
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("颜色", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+            BasicColors.forEach { color ->
+                BasicPaletteItem(
+                    color = color,
+                    selected = !customSelected && state.red == color.red && state.green == color.green && state.blue == color.blue,
+                    onClick = {
+                        customSelected = false
+                        customPanelExpanded = false
+                        advancedExpanded = false
+                        onColor(color.red, color.green, color.blue)
+                    }
+                )
+            }
+            CustomPaletteItem(
+                selected = customSelected,
+                color = Color(rememberedCustomColor.first, rememberedCustomColor.second, rememberedCustomColor.third),
+                checkColor = checkMarkColor(rememberedCustomColor.first, rememberedCustomColor.second, rememberedCustomColor.third),
+                onClick = {
+                    customSelected = true
+                    customPanelExpanded = true
+                    onColor(rememberedCustomColor.first, rememberedCustomColor.second, rememberedCustomColor.third)
+                }
+            )
+        }
+
+        if (customSelected && customPanelExpanded) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color(state.red, state.green, state.blue))
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(state.rgbHex, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "RGB ${state.red}, ${state.green}, ${state.blue}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = {
+                    customPanelExpanded = false
+                    advancedExpanded = false
+                }) {
+                    EyeOffIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("隐藏调色板")
+                }
+            }
+            SaturationValuePicker(
+                hue = displayHue,
+                saturation = hsv.saturation,
+                value = hsv.value,
+                onColor = { saturation, value ->
+                    val rgb = hsvToRgb(displayHue, saturation, value)
+                    updateCustomColor(rgb.first, rgb.second, rgb.third)
+                }
+            )
+            ColorGradientSlider(
+                label = "色相",
+                value = displayHue,
+                valueRange = 0f..360f,
+                brush = Brush.horizontalGradient(
+                    listOf(
+                        Color.Red,
+                        Color.Yellow,
+                        Color.Green,
+                        Color.Cyan,
+                        Color.Blue,
+                        Color.Magenta,
+                        Color.Red
+                    )
+                ),
+                valueText = "${displayHue.roundToInt()}°",
+                onValue = { hue ->
+                    val rgb = hsvToRgb(hue, hsv.saturation.takeIf { it > 0f } ?: 1f, hsv.value.takeIf { it > 0f } ?: 1f)
+                    updateCustomColor(rgb.first, rgb.second, rgb.third)
+                }
+            )
+            ColorGradientSlider(
+                label = "明度",
+                value = hsv.value * 100f,
+                valueRange = 0f..100f,
+                brush = Brush.horizontalGradient(listOf(Color.Black, hueColor)),
+                valueText = "${(hsv.value * 100f).roundToInt()}%",
+                onValue = { value ->
+                    val rgb = hsvToRgb(displayHue, hsv.saturation.takeIf { it > 0f } ?: 1f, value / 100f)
+                    updateCustomColor(rgb.first, rgb.second, rgb.third)
+                }
+            )
+
+            TextButton(onClick = { advancedExpanded = !advancedExpanded }) {
+                ExpandCollapseIcon(expanded = advancedExpanded, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(if (advancedExpanded) "收起 RGB 精调" else "展开 RGB 精调")
+            }
+            if (advancedExpanded) {
+                CompactRgbSlider("R", state.red) { updateCustomColor(it, state.green, state.blue) }
+                CompactRgbSlider("G", state.green) { updateCustomColor(state.red, it, state.blue) }
+                CompactRgbSlider("B", state.blue) { updateCustomColor(state.red, state.green, it) }
+            }
+            DashedDivider()
+        }
+    }
+}
+
+@Composable
+private fun EyeOffIcon(modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        val eyeWidth = size.width * 0.82f
+        val eyeHeight = size.height * 0.42f
+        val left = center.x - eyeWidth / 2f
+        val top = center.y - eyeHeight / 2f
+        val bottom = center.y + eyeHeight / 2f
+
+        drawArc(
+            color = color,
+            startAngle = 200f,
+            sweepAngle = 140f,
+            useCenter = false,
+            topLeft = Offset(left, top),
+            size = androidx.compose.ui.geometry.Size(eyeWidth, eyeHeight),
+            style = Stroke(width = stroke)
         )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(state.rgbHex, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
-            Text(
-                "RGB ${state.red}, ${state.green}, ${state.blue}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        drawArc(
+            color = color,
+            startAngle = 20f,
+            sweepAngle = 140f,
+            useCenter = false,
+            topLeft = Offset(left, bottom - eyeHeight),
+            size = androidx.compose.ui.geometry.Size(eyeWidth, eyeHeight),
+            style = Stroke(width = stroke)
+        )
+        drawCircle(color, radius = size.minDimension * 0.11f, center = center)
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.14f, size.height * 0.86f),
+            end = Offset(size.width * 0.86f, size.height * 0.14f),
+            strokeWidth = stroke
+        )
+    }
+}
+
+@Composable
+private fun ExpandCollapseIcon(expanded: Boolean, modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val stroke = 2.dp.toPx()
+        val left = size.width * 0.28f
+        val right = size.width * 0.72f
+        val top = size.height * 0.38f
+        val bottom = size.height * 0.62f
+        val middle = size.width * 0.5f
+
+        if (expanded) {
+            drawLine(color, Offset(left, bottom), Offset(middle, top), strokeWidth = stroke)
+            drawLine(color, Offset(middle, top), Offset(right, bottom), strokeWidth = stroke)
+        } else {
+            drawLine(color, Offset(left, top), Offset(middle, bottom), strokeWidth = stroke)
+            drawLine(color, Offset(middle, bottom), Offset(right, top), strokeWidth = stroke)
+        }
+    }
+}
+
+@Composable
+private fun DashedDivider() {
+    val color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(10.dp)
+    ) {
+        val dash = 7.dp.toPx()
+        val gap = 5.dp.toPx()
+        val y = center.y
+        var x = 0f
+        while (x < size.width) {
+            drawLine(
+                color = color,
+                start = Offset(x, y),
+                end = Offset((x + dash).coerceAtMost(size.width), y),
+                strokeWidth = 1.dp.toPx()
+            )
+            x += dash + gap
+        }
+    }
+}
+
+@Composable
+private fun SaturationValuePicker(
+    hue: Float,
+    saturation: Float,
+    value: Float,
+    onColor: (Float, Float) -> Unit
+) {
+    val baseColor = colorForHue(hue)
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .pointerInput(hue) {
+                fun updateColor(offset: Offset) {
+                    val newSaturation = (offset.x / size.width).coerceIn(0f, 1f)
+                    val newValue = (1f - offset.y / size.height).coerceIn(0f, 1f)
+                    onColor(newSaturation, newValue)
+                }
+                awaitEachGesture {
+                    val down = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.pressed } ?: return@awaitEachGesture
+                    updateColor(down.position)
+                    down.consume()
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull() ?: break
+                        if (change.changedToUpIgnoreConsumed()) {
+                            change.consume()
+                            break
+                        }
+                        if (change.pressed) {
+                            updateColor(change.position)
+                            change.consume()
+                        }
+                    }
+                }
+            }
+    ) {
+        drawRoundRect(
+            brush = Brush.horizontalGradient(listOf(Color.White, baseColor)),
+            cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
+        )
+        drawRoundRect(
+            brush = Brush.verticalGradient(listOf(Color.Transparent, Color.Black)),
+            cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
+        )
+
+        val handle = Offset(saturation.coerceIn(0f, 1f) * size.width, (1f - value.coerceIn(0f, 1f)) * size.height)
+        drawCircle(Color.White, radius = 9.dp.toPx(), center = handle, style = Stroke(width = 3.dp.toPx()))
+        drawCircle(Color.Black.copy(alpha = 0.65f), radius = 11.dp.toPx(), center = handle, style = Stroke(width = 1.dp.toPx()))
+    }
+}
+
+@Composable
+private fun ColorGradientSlider(
+    label: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    brush: Brush,
+    valueText: String,
+    onValue: (Float) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+            Text(valueText, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        GradientTrackSlider(
+            value = value,
+            valueRange = valueRange,
+            brush = brush,
+            onValue = onValue
+        )
+    }
+}
+
+@Composable
+private fun GradientTrackSlider(
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    brush: Brush,
+    onValue: (Float) -> Unit
+) {
+    val outlineColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(34.dp)
+            .pointerInput(valueRange) {
+                fun updateValue(offset: Offset) {
+                    val fraction = (offset.x / size.width).coerceIn(0f, 1f)
+                    onValue(valueRange.start + (valueRange.endInclusive - valueRange.start) * fraction)
+                }
+                awaitEachGesture {
+                    val down = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.pressed } ?: return@awaitEachGesture
+                    updateValue(down.position)
+                    down.consume()
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull() ?: break
+                        if (change.changedToUpIgnoreConsumed()) {
+                            change.consume()
+                            break
+                        }
+                        if (change.pressed) {
+                            updateValue(change.position)
+                            change.consume()
+                        }
+                    }
+                }
+            }
+    ) {
+        val trackHeight = 8.dp.toPx()
+        val trackTop = center.y - trackHeight / 2f
+        val trackCorner = trackHeight / 2f
+        drawRoundRect(
+            brush = brush,
+            topLeft = Offset(0f, trackTop),
+            size = androidx.compose.ui.geometry.Size(size.width, trackHeight),
+            cornerRadius = CornerRadius(trackCorner, trackCorner)
+        )
+        drawRoundRect(
+            color = outlineColor,
+            topLeft = Offset(0f, trackTop),
+            size = androidx.compose.ui.geometry.Size(size.width, trackHeight),
+            cornerRadius = CornerRadius(trackCorner, trackCorner),
+            style = Stroke(width = 1.dp.toPx())
+        )
+
+        val fraction = ((value.coerceIn(valueRange.start, valueRange.endInclusive) - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+        val x = fraction * size.width
+        drawCircle(surfaceColor, radius = 10.dp.toPx(), center = Offset(x, center.y))
+        drawCircle(outlineColor, radius = 10.dp.toPx(), center = Offset(x, center.y), style = Stroke(width = 1.5.dp.toPx()))
+    }
+}
+
+@Composable
+private fun BasicPaletteItem(
+    color: PaletteColor,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val checkColor = checkMarkColor(color.red, color.green, color.blue)
+    PaletteOption(
+        label = color.label,
+        selected = selected,
+        onClick = onClick
+    ) {
+        drawCircle(Color(color.red, color.green, color.blue), radius = size.minDimension / 2f)
+        if (selected) {
+            drawCheckMark(checkColor)
+        }
+    }
+}
+
+@Composable
+private fun CustomPaletteItem(
+    selected: Boolean,
+    color: Color,
+    checkColor: Color,
+    onClick: () -> Unit
+) {
+    val iconColor = MaterialTheme.colorScheme.onSurface
+    val backgroundColor = MaterialTheme.colorScheme.background
+    PaletteOption(
+        label = "自定义",
+        selected = selected,
+        onClick = onClick
+    ) {
+        val radius = size.minDimension / 2f - 2.dp.toPx()
+        drawCircle(if (selected) color else backgroundColor, radius = radius)
+        drawCircle(iconColor, radius = radius, style = Stroke(width = 2.dp.toPx()))
+        if (selected) {
+            drawCheckMark(checkColor)
+        } else {
+            val line = 8.dp.toPx()
+            drawLine(
+                color = iconColor,
+                start = Offset(center.x - line, center.y),
+                end = Offset(center.x + line, center.y),
+                strokeWidth = 2.dp.toPx()
+            )
+            drawLine(
+                color = iconColor,
+                start = Offset(center.x, center.y - line),
+                end = Offset(center.x, center.y + line),
+                strokeWidth = 2.dp.toPx()
             )
         }
     }
-    NumberSlider("R", state.red, 0..255) { onColor(it, state.green, state.blue) }
-    NumberSlider("G", state.green, 0..255) { onColor(state.red, it, state.blue) }
-    NumberSlider("B", state.blue, 0..255) { onColor(state.red, state.green, it) }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        QuickColors.forEach { (label, rgb) ->
-            OutlinedButton(onClick = { onColor(rgb.first, rgb.second, rgb.third) }) {
-                Text(label)
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCheckMark(color: Color) {
+    val stroke = 3.dp.toPx()
+    drawLine(
+        color = color,
+        start = Offset(size.width * 0.30f, size.height * 0.52f),
+        end = Offset(size.width * 0.44f, size.height * 0.66f),
+        strokeWidth = stroke
+    )
+    drawLine(
+        color = color,
+        start = Offset(size.width * 0.44f, size.height * 0.66f),
+        end = Offset(size.width * 0.72f, size.height * 0.34f),
+        strokeWidth = stroke
+    )
+}
+
+@Composable
+private fun PaletteOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    content: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit
+) {
+    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    Column(
+        modifier = Modifier.width(58.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Canvas(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onClick)
+        ) {
+            content()
+            drawCircle(
+                color = borderColor,
+                radius = size.minDimension / 2f - 1.5.dp.toPx(),
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun CompactRgbSlider(
+    label: String,
+    value: Int,
+    onValue: (Int) -> Unit
+) {
+    InlineNumberSlider(
+        label = label,
+        value = value,
+        range = 0..255,
+        labelWidth = 18.dp,
+        onValue = onValue
+    )
+}
+
+@Composable
+private fun InlineNumberSlider(
+    label: String,
+    value: Int,
+    range: IntRange,
+    labelWidth: androidx.compose.ui.unit.Dp = 96.dp,
+    onValue: (Int) -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            label,
+            modifier = Modifier.width(labelWidth),
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValue(it.roundToInt().coerceIn(range.first, range.last)) },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            modifier = Modifier.weight(1f)
+        )
+        UnderlineNumberField(
+            value = value,
+            range = range,
+            onValue = { onValue(it.coerceIn(range.first, range.last)) }
+        )
+    }
+}
+
+@Composable
+private fun UnderlineNumberField(
+    value: Int,
+    range: IntRange,
+    onValue: (Int) -> Unit
+) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    val lineColor = MaterialTheme.colorScheme.outline
+
+    BasicTextField(
+        value = text,
+        onValueChange = { input ->
+            val filtered = input.filter { it.isDigit() }.take(3)
+            text = filtered
+            filtered.toIntOrNull()?.let { onValue(it.coerceIn(range.first, range.last)) }
+        },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(
+            color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center
+        ),
+        modifier = Modifier
+            .width(42.dp)
+            .height(28.dp),
+        decorationBox = { innerTextField ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    innerTextField()
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(lineColor)
+                )
             }
         }
-    }
+    )
 }
 
 @Composable
@@ -695,23 +1247,7 @@ private fun NumberSlider(
     range: IntRange,
     onValue: (Int) -> Unit
 ) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                value = value.toString(),
-                onValueChange = { text -> text.toIntOrNull()?.let { onValue(it.coerceIn(range.first, range.last)) } },
-                modifier = Modifier.width(92.dp),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-            )
-        }
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onValue(it.toInt().coerceIn(range.first, range.last)) },
-            valueRange = range.first.toFloat()..range.last.toFloat()
-        )
-    }
+    InlineNumberSlider(label = label, value = value, range = range, onValue = onValue)
 }
 
 @Composable
