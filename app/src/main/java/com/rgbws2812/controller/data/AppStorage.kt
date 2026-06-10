@@ -33,6 +33,7 @@ class AppStorage(
                 control = preferences[ControlKey]?.let { decodeControl(it) } ?: RgbControlState.Default,
                 autoSendEnabled = preferences[AutoSendKey] ?: false,
                 showAdvancedSendPanel = preferences[ShowAdvancedSendPanelKey] ?: false,
+                useAdvancedFlowEditor = preferences[UseAdvancedFlowEditorKey] ?: false,
                 presets = preferences[PresetsKey]?.let { decodePresets(it) } ?: emptyList(),
                 history = preferences[HistoryKey]?.let { decodeHistory(it) } ?: emptyList()
             )
@@ -53,6 +54,12 @@ class AppStorage(
     suspend fun saveShowAdvancedSendPanel(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[ShowAdvancedSendPanelKey] = enabled
+        }
+    }
+
+    suspend fun saveUseAdvancedFlowEditor(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[UseAdvancedFlowEditorKey] = enabled
         }
     }
 
@@ -93,6 +100,7 @@ class AppStorage(
         private val ControlKey = stringPreferencesKey("control")
         private val AutoSendKey = booleanPreferencesKey("auto_send")
         private val ShowAdvancedSendPanelKey = booleanPreferencesKey("show_advanced_send_panel")
+        private val UseAdvancedFlowEditorKey = booleanPreferencesKey("use_advanced_flow_editor")
         private val PresetsKey = stringPreferencesKey("presets")
         private val HistoryKey = stringPreferencesKey("history")
         const val MaxHistoryItems = 60

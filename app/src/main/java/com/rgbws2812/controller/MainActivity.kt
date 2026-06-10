@@ -179,7 +179,8 @@ private val PrimaryControlModes = listOf(
 private val FlowOrderPresets = listOf(
     "正序" to listOf(3, 2, 1, 0, 4, 5, 6, 7),
     "反序" to listOf(7, 6, 5, 4, 0, 1, 2, 3),
-    "先偶后奇" to listOf(3, 1, 4, 6, 2, 0, 5, 7),
+    "顺时针" to listOf(3, 2, 1, 0, 7, 6, 5, 4),
+    "逆时针" to listOf(4, 5, 6, 7, 0, 1, 2, 3),
     "交错" to listOf(3, 4, 2, 5, 1, 6, 0, 7)
 )
 
@@ -402,6 +403,8 @@ private fun ControllerContent(
         onActivePeriod = { viewModel.updateActivePeriod(it) },
         onToggleLed = { viewModel.toggleOrderLed(it) },
         onOrder = { viewModel.setOrder(it) },
+        useAdvancedFlowEditor = state.useAdvancedFlowEditor,
+        onUseAdvancedFlowEditor = { viewModel.setUseAdvancedFlowEditor(it) },
         onToggleFlowFrameLed = { frameIndex, led -> viewModel.toggleFlowFrameLed(frameIndex, led) },
         onFlowFrames = { viewModel.setFlowFrames(it) },
         onGenerateFlowFramesFromOrder = { viewModel.generateFlowFramesFromOrder() },
@@ -490,6 +493,8 @@ private fun ControllerPage(
     onActivePeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
+    useAdvancedFlowEditor: Boolean,
+    onUseAdvancedFlowEditor: (Boolean) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
     onGenerateFlowFramesFromOrder: () -> Unit,
@@ -521,7 +526,7 @@ private fun ControllerPage(
         if (previewVisible && isLandscape) {
             Row(modifier = Modifier.fillMaxSize()) {
                 LedPreviewPanel(
-                    state = state.control,
+                    state = state.effectiveControl,
                     isLandscape = true,
                     onClose = onClosePreview,
                     modifier = Modifier
@@ -538,6 +543,8 @@ private fun ControllerPage(
                     onActivePeriod = onActivePeriod,
                     onToggleLed = onToggleLed,
                     onOrder = onOrder,
+                    useAdvancedFlowEditor = useAdvancedFlowEditor,
+                    onUseAdvancedFlowEditor = onUseAdvancedFlowEditor,
                     onToggleFlowFrameLed = onToggleFlowFrameLed,
                     onFlowFrames = onFlowFrames,
                     onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
@@ -571,6 +578,8 @@ private fun ControllerPage(
                     onActivePeriod = onActivePeriod,
                     onToggleLed = onToggleLed,
                     onOrder = onOrder,
+                    useAdvancedFlowEditor = useAdvancedFlowEditor,
+                    onUseAdvancedFlowEditor = onUseAdvancedFlowEditor,
                     onToggleFlowFrameLed = onToggleFlowFrameLed,
                     onFlowFrames = onFlowFrames,
                     onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
@@ -593,7 +602,7 @@ private fun ControllerPage(
                     onImport = onImport
                 )
                 LedPreviewPanel(
-                    state = state.control,
+                    state = state.effectiveControl,
                     isLandscape = false,
                     onClose = onClosePreview,
                     modifier = Modifier
@@ -612,6 +621,8 @@ private fun ControllerPage(
                 onActivePeriod = onActivePeriod,
                 onToggleLed = onToggleLed,
                 onOrder = onOrder,
+                useAdvancedFlowEditor = useAdvancedFlowEditor,
+                onUseAdvancedFlowEditor = onUseAdvancedFlowEditor,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
                 onFlowFrames = onFlowFrames,
                 onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
@@ -647,6 +658,8 @@ private fun ControllerPageList(
     onActivePeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
+    useAdvancedFlowEditor: Boolean,
+    onUseAdvancedFlowEditor: (Boolean) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
     onGenerateFlowFramesFromOrder: () -> Unit,
@@ -684,6 +697,8 @@ private fun ControllerPageList(
                 onActivePeriod = onActivePeriod,
                 onToggleLed = onToggleLed,
                 onOrder = onOrder,
+                useAdvancedFlowEditor = useAdvancedFlowEditor,
+                onUseAdvancedFlowEditor = onUseAdvancedFlowEditor,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
                 onFlowFrames = onFlowFrames,
                 onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
@@ -1368,6 +1383,8 @@ private fun ControlSection(
     onActivePeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
+    useAdvancedFlowEditor: Boolean,
+    onUseAdvancedFlowEditor: (Boolean) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
     onGenerateFlowFramesFromOrder: () -> Unit,
@@ -1456,6 +1473,8 @@ private fun ControlSection(
                 flowFrames = state.flowFrames,
                 onToggleLed = onToggleLed,
                 onOrder = onOrder,
+                useAdvancedFlowEditor = useAdvancedFlowEditor,
+                onUseAdvancedFlowEditor = onUseAdvancedFlowEditor,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
                 onFlowFrames = onFlowFrames,
                 onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
@@ -1687,6 +1706,55 @@ private fun AddFrameIcon(modifier: Modifier = Modifier, color: Color) {
             color = color,
             start = Offset(size.width * 0.2f, size.height * 0.5f),
             end = Offset(size.width * 0.8f, size.height * 0.5f),
+            strokeWidth = stroke
+        )
+    }
+}
+
+@Composable
+private fun ClearSelectionIcon(modifier: Modifier = Modifier, color: Color) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.2f, size.height * 0.32f),
+            end = Offset(size.width * 0.8f, size.height * 0.32f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.3f, size.height * 0.32f),
+            end = Offset(size.width * 0.3f, size.height * 0.74f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.7f, size.height * 0.32f),
+            end = Offset(size.width * 0.7f, size.height * 0.74f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.3f, size.height * 0.74f),
+            end = Offset(size.width * 0.7f, size.height * 0.74f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.4f, size.height * 0.2f),
+            end = Offset(size.width * 0.6f, size.height * 0.2f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.42f, size.height * 0.46f),
+            end = Offset(size.width * 0.58f, size.height * 0.62f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.58f, size.height * 0.46f),
+            end = Offset(size.width * 0.42f, size.height * 0.62f),
             strokeWidth = stroke
         )
     }
@@ -2191,6 +2259,8 @@ private fun FlowOrderEditor(
     flowFrames: List<Int>,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
+    useAdvancedFlowEditor: Boolean,
+    onUseAdvancedFlowEditor: (Boolean) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
     onGenerateFlowFramesFromOrder: () -> Unit,
@@ -2199,14 +2269,17 @@ private fun FlowOrderEditor(
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedTab by remember(useAdvancedFlowEditor) { mutableStateOf(if (useAdvancedFlowEditor) 1 else 0) }
 
     Spacer(modifier = Modifier.height(12.dp))
     TabRow(selectedTabIndex = selectedTab) {
         FlowEditorTabs.forEachIndexed { index, title ->
             Tab(
                 selected = selectedTab == index,
-                onClick = { selectedTab = index },
+                onClick = {
+                    selectedTab = index
+                    onUseAdvancedFlowEditor(index == 1)
+                },
                 text = { Text(title) }
             )
         }
@@ -2277,25 +2350,21 @@ private fun BasicFlowOrderEditor(
         }
     }
     Spacer(modifier = Modifier.height(10.dp))
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        FlowOrderPresets.forEach { (label, preset) ->
-            OutlinedButton(onClick = { onOrder(preset) }) { Text(label) }
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FlowOrderPresets.forEach { (label, preset) ->
+                OutlinedButton(onClick = { onOrder(preset) }) { Text(label) }
+            }
+            OutlinedButton(onClick = { onOrder(emptyList()) }) {
+                ClearSelectionIcon(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("清空选择")
+            }
         }
-        OutlinedButton(onClick = { onOrder(emptyList()) }) { Text("清空选择") }
-    }
-    Spacer(modifier = Modifier.height(6.dp))
-    Text(
-        "基础流水顺序单独保存；点击“用基础灯序生成”后才会覆盖高级画面。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    if (!RgbFrameBuilder.isValidOrder(order)) {
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            "基础流水灯序未点满；高级画面仍可发送，或点击“用基础灯序生成”。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 
@@ -2310,10 +2379,16 @@ private fun AdvancedFlowFrameEditor(
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit
 ) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onGenerateFlowFramesFromOrder) { Text("用基础灯序生成") }
-        OutlinedButton(onClick = { onFlowFrames(List(RgbControlState.MaxFlowFrames) { 0xFF }) }) { Text("全亮") }
-        OutlinedButton(onClick = { onFlowFrames(List(RgbControlState.MaxFlowFrames) { 0x00 }) }) { Text("全灭") }
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(onClick = onGenerateFlowFramesFromOrder) { Text("用基础灯序生成") }
+            OutlinedButton(onClick = { onFlowFrames(List(flowFrames.size) { 0xFF }) }) { Text("全亮") }
+            OutlinedButton(onClick = { onFlowFrames(List(flowFrames.size) { 0x00 }) }) { Text("全灭") }
+        }
     }
     Spacer(modifier = Modifier.height(8.dp))
     flowFrames.forEachIndexed { frameIndex, mask ->
@@ -2323,9 +2398,17 @@ private fun AdvancedFlowFrameEditor(
                 .padding(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text("画面 ${frameIndex + 1}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "画面 ${frameIndex + 1}",
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(mask.coerceIn(0, 255).toHexByte(), fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     IconButton(
                         enabled = frameIndex > 0,
@@ -2391,12 +2474,6 @@ private fun AdvancedFlowFrameEditor(
             }
         }
     }
-    Spacer(modifier = Modifier.height(6.dp))
-    Text(
-        "每个画面是 1 字节灯掩码，可同时点亮多颗灯；画面数量范围 1~8。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
 }
 
 @Composable

@@ -49,6 +49,7 @@ data class AppStorageState(
     val control: RgbControlState = RgbControlState.Default,
     val autoSendEnabled: Boolean = false,
     val showAdvancedSendPanel: Boolean = false,
+    val useAdvancedFlowEditor: Boolean = false,
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList()
 )

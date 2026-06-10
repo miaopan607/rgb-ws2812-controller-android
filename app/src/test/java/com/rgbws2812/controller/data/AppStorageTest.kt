@@ -14,6 +14,11 @@ class AppStorageTest {
     }
 
     @Test
+    fun appStorageStateDefaultsToBasicFlowEditor() {
+        assertFalse(com.rgbws2812.controller.model.AppStorageState().useAdvancedFlowEditor)
+    }
+
+    @Test
     fun restoreControlStatePrefersVersion2TimingFields() {
         val decoded = AppStorage.restoreControlState(
             modeValue = ControlMode.Breath.wireValue,
@@ -115,5 +120,6 @@ class AppStorageTest {
         )
 
         assertFalse(state.showAdvancedSendPanel)
+        assertFalse(state.useAdvancedFlowEditor)
     }
 }

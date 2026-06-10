@@ -29,11 +29,13 @@ import java.util.UUID
 
 data class MainUiState(
     val control: RgbControlState = RgbControlState.Default,
+    val effectiveControl: RgbControlState = RgbControlState.Default,
     val frame: RgbFrame = RgbFrameBuilder.build(RgbControlState.Default),
     val orderValid: Boolean = true,
     val flowFramesValid: Boolean = true,
     val autoSendEnabled: Boolean = false,
     val showAdvancedSendPanel: Boolean = false,
+    val useAdvancedFlowEditor: Boolean = false,
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList(),
     val bluetooth: BluetoothUiState = BluetoothUiState(),
@@ -51,16 +53,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val uiState: StateFlow<MainUiState> =
         combine(storage.state, bluetoothClient.state, manualState) { storageState, bluetoothState, manual ->
-            val frame = RgbFrameBuilder.build(storageState.control)
+            val effectiveControl = effectiveControl(storageState)
+            val frame = RgbFrameBuilder.build(effectiveControl)
             val orderValid = RgbFrameBuilder.isValidOrder(storageState.control.order)
-            val flowFramesValid = RgbFrameBuilder.isValidFlowFrames(storageState.control.flowFrames)
+            val flowFramesValid = RgbFrameBuilder.isValidFlowFrames(effectiveControl.flowFrames)
             MainUiState(
                 control = storageState.control,
+                effectiveControl = effectiveControl,
                 frame = frame,
                 orderValid = orderValid,
                 flowFramesValid = flowFramesValid,
                 autoSendEnabled = storageState.autoSendEnabled,
                 showAdvancedSendPanel = storageState.showAdvancedSendPanel,
+                useAdvancedFlowEditor = storageState.useAdvancedFlowEditor,
                 presets = storageState.presets,
                 history = storageState.history,
                 bluetooth = bluetoothState,
@@ -218,6 +223,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             storage.saveShowAdvancedSendPanel(enabled)
             manualState.update { it.copy(statusMessage = if (enabled) "高级发送面板已显示" else "高级发送面板已隐藏") }
+        }
+    }
+
+    fun setUseAdvancedFlowEditor(enabled: Boolean) {
+        viewModelScope.launch {
+            storage.saveUseAdvancedFlowEditor(enabled)
+            scheduleAutoSend()
         }
     }
 
@@ -405,6 +417,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             hex = frame.spacedHex()
         )
         storage.saveHistory((listOf(item) + state.history).take(AppStorage.MaxHistoryItems))
+    }
+
+    private fun effectiveControl(storageState: AppStorageState): RgbControlState {
+        val control = storageState.control
+        val effectiveFrames = if (storageState.useAdvancedFlowEditor) {
+            control.flowFrames
+        } else {
+            RgbFrameBuilder.orderToFlowFrames(control.order)
+        }
+        return control.copy(flowFrames = effectiveFrames).clamped()
     }
 
     private data class ManualUiState(
