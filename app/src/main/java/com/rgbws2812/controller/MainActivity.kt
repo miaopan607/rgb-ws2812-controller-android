@@ -469,6 +469,9 @@ private fun ControllerContent(
         onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
         onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
         onMusicMaxBrightness = { viewModel.setMusicMaxBrightness(it) },
+        onMusicSensitivity = { viewModel.setMusicSensitivity(it) },
+        onMusicPunch = { viewModel.setMusicPunch(it) },
+        onMusicAmbientLimit = { viewModel.setMusicAmbientLimit(it) },
         onMusicAudioSource = { viewModel.setMusicAudioSource(it) },
         microphonePermissionGranted = microphonePermissionGranted,
         onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -564,6 +567,9 @@ private fun ControllerPage(
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
     onMusicMaxBrightness: (Int) -> Unit,
+    onMusicSensitivity: (Int) -> Unit,
+    onMusicPunch: (Int) -> Unit,
+    onMusicAmbientLimit: (Int) -> Unit,
     onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     microphonePermissionGranted: Boolean,
     onRequestMicrophonePermission: () -> Unit,
@@ -619,6 +625,9 @@ private fun ControllerPage(
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
                     onMusicMaxBrightness = onMusicMaxBrightness,
+                    onMusicSensitivity = onMusicSensitivity,
+                    onMusicPunch = onMusicPunch,
+                    onMusicAmbientLimit = onMusicAmbientLimit,
                     onMusicAudioSource = onMusicAudioSource,
                     microphonePermissionGranted = microphonePermissionGranted,
                     onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -659,6 +668,9 @@ private fun ControllerPage(
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
                     onMusicMaxBrightness = onMusicMaxBrightness,
+                    onMusicSensitivity = onMusicSensitivity,
+                    onMusicPunch = onMusicPunch,
+                    onMusicAmbientLimit = onMusicAmbientLimit,
                     onMusicAudioSource = onMusicAudioSource,
                     microphonePermissionGranted = microphonePermissionGranted,
                     onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -707,6 +719,9 @@ private fun ControllerPage(
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown,
                 onMusicMaxBrightness = onMusicMaxBrightness,
+                onMusicSensitivity = onMusicSensitivity,
+                onMusicPunch = onMusicPunch,
+                onMusicAmbientLimit = onMusicAmbientLimit,
                 onMusicAudioSource = onMusicAudioSource,
                 microphonePermissionGranted = microphonePermissionGranted,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -749,6 +764,9 @@ private fun ControllerPageList(
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
     onMusicMaxBrightness: (Int) -> Unit,
+    onMusicSensitivity: (Int) -> Unit,
+    onMusicPunch: (Int) -> Unit,
+    onMusicAmbientLimit: (Int) -> Unit,
     onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     microphonePermissionGranted: Boolean,
     onRequestMicrophonePermission: () -> Unit,
@@ -796,6 +814,9 @@ private fun ControllerPageList(
                 musicRuntime = state.musicRuntime,
                 microphonePermissionGranted = microphonePermissionGranted,
                 onMusicMaxBrightness = onMusicMaxBrightness,
+                onMusicSensitivity = onMusicSensitivity,
+                onMusicPunch = onMusicPunch,
+                onMusicAmbientLimit = onMusicAmbientLimit,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
                 onMusicAudioSource = onMusicAudioSource,
                 onRequestSystemAudioCapture = onRequestSystemAudioCapture,
@@ -1512,6 +1533,9 @@ private fun ControlSection(
     musicRuntime: com.rgbws2812.controller.audio.MusicReactiveRuntimeState,
     microphonePermissionGranted: Boolean,
     onMusicMaxBrightness: (Int) -> Unit,
+    onMusicSensitivity: (Int) -> Unit,
+    onMusicPunch: (Int) -> Unit,
+    onMusicAmbientLimit: (Int) -> Unit,
     onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     onRequestMicrophonePermission: () -> Unit,
     onRequestSystemAudioCapture: () -> Unit
@@ -1559,6 +1583,9 @@ private fun ControlSection(
                 runtime = musicRuntime,
                 microphonePermissionGranted = microphonePermissionGranted,
                 onMaxBrightness = onMusicMaxBrightness,
+                onSensitivity = onMusicSensitivity,
+                onPunch = onMusicPunch,
+                onAmbientLimit = onMusicAmbientLimit,
                 onAudioSource = onMusicAudioSource,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
                 onRequestSystemAudioCapture = onRequestSystemAudioCapture
@@ -1631,6 +1658,9 @@ private fun MusicReactiveControls(
     runtime: com.rgbws2812.controller.audio.MusicReactiveRuntimeState,
     microphonePermissionGranted: Boolean,
     onMaxBrightness: (Int) -> Unit,
+    onSensitivity: (Int) -> Unit,
+    onPunch: (Int) -> Unit,
+    onAmbientLimit: (Int) -> Unit,
     onAudioSource: (MusicReactiveAudioSource) -> Unit,
     onRequestMicrophonePermission: () -> Unit,
     onRequestSystemAudioCapture: () -> Unit
@@ -1689,6 +1719,30 @@ private fun MusicReactiveControls(
         value = settings.maxBrightness,
         range = 0..255,
         onValue = onMaxBrightness
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    NumberSlider(
+        label = "律动灵敏度",
+        value = settings.sensitivity,
+        range = 50..200,
+        valueHint = "${settings.sensitivity}%",
+        onValue = onSensitivity
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    NumberSlider(
+        label = "鼓点冲击",
+        value = settings.punch,
+        range = 0..200,
+        valueHint = "${settings.punch}%",
+        onValue = onPunch
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    NumberSlider(
+        label = "环境保留上限",
+        value = settings.ambientLimit,
+        range = 0..40,
+        valueHint = "${settings.ambientLimit}%",
+        onValue = onAmbientLimit
     )
     Spacer(modifier = Modifier.height(12.dp))
     SectionSubheading("实时电平")

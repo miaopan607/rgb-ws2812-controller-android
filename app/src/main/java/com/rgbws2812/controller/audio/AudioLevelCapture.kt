@@ -40,6 +40,10 @@ class AudioLevelCapture(
     private val _state = MutableStateFlow(AudioCaptureState())
     val state: StateFlow<AudioCaptureState> = _state
 
+    fun updateSettings(settings: MusicReactiveSettings) {
+        analyzer.updateSettings(settings)
+    }
+
     suspend fun start(source: MusicReactiveAudioSource, mediaProjectionPermission: MediaProjectionPermission? = null): Boolean {
         stop()
         _state.update {

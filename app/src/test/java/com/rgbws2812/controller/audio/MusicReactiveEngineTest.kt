@@ -48,11 +48,100 @@ class MusicReactiveEngineTest {
         assertEquals(level.left, level.right, 0.0001f)
     }
 
+    @Test
+    fun sustainedLoudBassDoesNotStayPinnedToMaximum() {
+        val sampleRate = 8_000
+        val analyzer = LowFrequencyAnalyzer(sampleRate)
+        val loudBass = stereoSine(sampleRate, frequency = 120.0, durationMillis = 80, amplitude = 0.85)
+
+        var level = StereoLevel()
+        repeat(18) {
+            level = analyzer.analyzeInterleavedStereo(loudBass, loudBass.size)
+        }
+
+        assertTrue("sustained loud bass should leave headroom", level.left < 0.92f)
+        assertTrue("sustained loud bass should leave headroom", level.right < 0.92f)
+        assertTrue("sustained loud bass should still be visible", level.left > 0.2f)
+        assertTrue("sustained loud bass should still be visible", level.right > 0.2f)
+    }
+
+    @Test
+    fun lowFrequencyPulseCreatesStrongerResponseThanSteadyTone() {
+        val sampleRate = 8_000
+        val analyzer = LowFrequencyAnalyzer(sampleRate)
+        val quietBass = stereoSine(sampleRate, frequency = 120.0, durationMillis = 80, amplitude = 0.16)
+        val pulseBass = stereoSine(sampleRate, frequency = 120.0, durationMillis = 80, amplitude = 0.82)
+
+        var steady = StereoLevel()
+        repeat(10) {
+            steady = analyzer.analyzeInterleavedStereo(quietBass, quietBass.size)
+        }
+        val pulse = analyzer.analyzeInterleavedStereo(pulseBass, pulseBass.size)
+
+        assertTrue(pulse.left > steady.left + 0.18f)
+        assertTrue(pulse.right > steady.right + 0.18f)
+    }
+
+    @Test
+    fun silenceAfterBassDecaysTowardZero() {
+        val sampleRate = 8_000
+        val analyzer = LowFrequencyAnalyzer(sampleRate)
+        val bass = stereoSine(sampleRate, frequency = 120.0, durationMillis = 80, amplitude = 0.75)
+        val silence = ShortArray(sampleRate * 80 / 1_000 * 2)
+
+        analyzer.analyzeInterleavedStereo(bass, bass.size)
+        var level = StereoLevel()
+        repeat(16) {
+            level = analyzer.analyzeInterleavedStereo(silence, silence.size)
+        }
+
+        assertTrue(level.left < 0.08f)
+        assertTrue(level.right < 0.08f)
+    }
+
+    @Test
+    fun highToneKeepsLimitedAmbientLevel() {
+        val sampleRate = 8_000
+        val analyzer = LowFrequencyAnalyzer(sampleRate)
+        analyzer.updateSettings(MusicReactiveSettings(ambientLimit = 12))
+        val high = stereoSine(sampleRate, frequency = 1_200.0, durationMillis = 80, amplitude = 0.55)
+
+        var level = StereoLevel()
+        repeat(8) {
+            level = analyzer.analyzeInterleavedStereo(high, high.size)
+        }
+
+        assertTrue("high tone should keep a little ambient response", level.left > 0.015f)
+        assertTrue("high tone should keep a little ambient response", level.right > 0.015f)
+        assertTrue("ambient response must stay under configured cap", level.left <= 0.125f)
+        assertTrue("ambient response must stay under configured cap", level.right <= 0.125f)
+    }
+
+    @Test
+    fun ambientLimitCanDisableNonBassResponse() {
+        val sampleRate = 8_000
+        val analyzer = LowFrequencyAnalyzer(sampleRate)
+        analyzer.updateSettings(MusicReactiveSettings(ambientLimit = 0))
+        val high = stereoSine(sampleRate, frequency = 1_200.0, durationMillis = 80, amplitude = 0.55)
+
+        var level = StereoLevel()
+        repeat(8) {
+            level = analyzer.analyzeInterleavedStereo(high, high.size)
+        }
+
+        assertTrue(level.left < 0.015f)
+        assertTrue(level.right < 0.015f)
+    }
+
     private fun stereoSine(sampleRate: Int, frequency: Double, durationMillis: Int): ShortArray {
+        return stereoSine(sampleRate, frequency, durationMillis, amplitude = 0.45)
+    }
+
+    private fun stereoSine(sampleRate: Int, frequency: Double, durationMillis: Int, amplitude: Double): ShortArray {
         val frames = sampleRate * durationMillis / 1_000
         val samples = ShortArray(frames * 2)
         repeat(frames) { frame ->
-            val value = (sin(2.0 * PI * frequency * frame / sampleRate) * Short.MAX_VALUE * 0.45).toInt().toShort()
+            val value = (sin(2.0 * PI * frequency * frame / sampleRate) * Short.MAX_VALUE * amplitude).toInt().toShort()
             samples[frame * 2] = value
             samples[frame * 2 + 1] = value
         }

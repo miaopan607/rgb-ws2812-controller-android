@@ -288,6 +288,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         musicState.update { it.copy(settings = it.settings.copy(maxBrightness = value).clamped()) }
     }
 
+    fun setMusicSensitivity(value: Int) {
+        musicState.update { current ->
+            current.copy(settings = current.settings.copy(sensitivity = value).clamped())
+        }
+        audioCapture.updateSettings(musicState.value.settings)
+    }
+
+    fun setMusicPunch(value: Int) {
+        musicState.update { current ->
+            current.copy(settings = current.settings.copy(punch = value).clamped())
+        }
+        audioCapture.updateSettings(musicState.value.settings)
+    }
+
+    fun setMusicAmbientLimit(value: Int) {
+        musicState.update { current ->
+            current.copy(settings = current.settings.copy(ambientLimit = value).clamped())
+        }
+        audioCapture.updateSettings(musicState.value.settings)
+    }
+
     fun setMusicAudioSource(source: MusicReactiveAudioSource) {
         val wasRunning = musicState.value.isRunning
         if (wasRunning) stopMusicReactive()
@@ -321,6 +342,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             storage.saveControl(state.control.copy(mode = ControlMode.MusicReactive).clamped())
         }
         val cleanSettings = state.musicSettings.clamped()
+        audioCapture.updateSettings(cleanSettings)
         musicState.update {
             it.copy(
                 settings = cleanSettings,

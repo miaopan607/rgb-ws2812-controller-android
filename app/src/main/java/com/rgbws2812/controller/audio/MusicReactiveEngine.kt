@@ -3,7 +3,6 @@ package com.rgbws2812.controller.audio
 import com.rgbws2812.controller.protocol.RealtimeLed
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -19,12 +18,18 @@ data class StereoLevel(
 data class MusicReactiveSettings(
     val maxBrightness: Int = 64,
     val targetFps: Int = 20,
+    val sensitivity: Int = 115,
+    val punch: Int = 125,
+    val ambientLimit: Int = 10,
     val audioSource: MusicReactiveAudioSource = MusicReactiveAudioSource.Microphone
 ) {
     fun clamped(): MusicReactiveSettings =
         copy(
             maxBrightness = maxBrightness.coerceIn(0, 255),
-            targetFps = targetFps.coerceIn(1, 25)
+            targetFps = targetFps.coerceIn(1, 25),
+            sensitivity = sensitivity.coerceIn(50, 200),
+            punch = punch.coerceIn(0, 200),
+            ambientLimit = ambientLimit.coerceIn(0, 40)
         )
 }
 
@@ -70,33 +75,56 @@ object MusicReactiveMapper {
 
 class LowFrequencyAnalyzer(
     private val sampleRate: Int,
-    private val lowCutHz: Float = 60f,
-    private val highCutHz: Float = 250f
+    private val lowCutHz: Float = 55f,
+    private val highCutHz: Float = 260f
 ) {
     private val leftBandPass = BiquadBandPass(sampleRate, lowCutHz, highCutHz)
     private val rightBandPass = BiquadBandPass(sampleRate, lowCutHz, highCutHz)
     private val monoBandPass = BiquadBandPass(sampleRate, lowCutHz, highCutHz)
+    private val leftDynamics = RhythmEnvelope()
+    private val rightDynamics = RhythmEnvelope()
+    private val monoDynamics = RhythmEnvelope()
+    private val leftAmbient = AmbientEnvelope()
+    private val rightAmbient = AmbientEnvelope()
+    private val monoAmbient = AmbientEnvelope()
+    private var sensitivity = 1.15f
+    private var punch = 1.25f
+    private var ambientLimit = 0.1f
+
+    fun updateSettings(settings: MusicReactiveSettings) {
+        val cleanSettings = settings.clamped()
+        sensitivity = cleanSettings.sensitivity / 100f
+        punch = cleanSettings.punch / 100f
+        ambientLimit = cleanSettings.ambientLimit / 100f
+    }
 
     fun analyzeMonoAsStereo(samples: ShortArray, sampleCount: Int): StereoLevel {
         if (sampleCount <= 0) return StereoLevel()
-        var energy = 0.0
+        var lowEnergy = 0.0
+        var fullEnergy = 0.0
         val limit = min(samples.size, sampleCount)
         for (index in 0 until limit) {
             val sample = samples[index] / 32768f
             val filtered = monoBandPass.process(sample)
-            energy += filtered * filtered
+            lowEnergy += filtered * filtered
+            fullEnergy += sample * sample
         }
         if (limit == 0) return StereoLevel()
 
-        val rms = sqrt(energy / limit).toFloat()
-        val level = rmsToDisplayLevel(rms)
+        val lowRms = sqrt(lowEnergy / limit).toFloat()
+        val fullRms = sqrt(fullEnergy / limit).toFloat()
+        val rhythm = monoDynamics.process(lowRms, sensitivity, punch) * bassWeight(lowRms, fullRms)
+        val ambient = monoAmbient.process(fullRms, ambientLimit)
+        val level = max(rhythm, ambient)
         return StereoLevel(left = level, right = level)
     }
 
     fun analyzeInterleavedStereo(samples: ShortArray, sampleCount: Int): StereoLevel {
         if (sampleCount <= 0) return StereoLevel()
-        var leftEnergy = 0.0
-        var rightEnergy = 0.0
+        var leftLowEnergy = 0.0
+        var rightLowEnergy = 0.0
+        var leftFullEnergy = 0.0
+        var rightFullEnergy = 0.0
         var frames = 0
         var index = 0
         val limit = min(samples.size, sampleCount)
@@ -105,18 +133,28 @@ class LowFrequencyAnalyzer(
             val right = samples[index + 1] / 32768f
             val filteredLeft = leftBandPass.process(left)
             val filteredRight = rightBandPass.process(right)
-            leftEnergy += filteredLeft * filteredLeft
-            rightEnergy += filteredRight * filteredRight
+            leftLowEnergy += filteredLeft * filteredLeft
+            rightLowEnergy += filteredRight * filteredRight
+            leftFullEnergy += left * left
+            rightFullEnergy += right * right
             frames++
             index += 2
         }
         if (frames == 0) return StereoLevel()
 
-        val leftRms = sqrt(leftEnergy / frames).toFloat()
-        val rightRms = sqrt(rightEnergy / frames).toFloat()
+        val leftRms = sqrt(leftLowEnergy / frames).toFloat()
+        val rightRms = sqrt(rightLowEnergy / frames).toFloat()
+        val leftFullRms = sqrt(leftFullEnergy / frames).toFloat()
+        val rightFullRms = sqrt(rightFullEnergy / frames).toFloat()
         return StereoLevel(
-            left = rmsToDisplayLevel(leftRms),
-            right = rmsToDisplayLevel(rightRms)
+            left = max(
+                leftDynamics.process(leftRms, sensitivity, punch) * bassWeight(leftRms, leftFullRms),
+                leftAmbient.process(leftFullRms, ambientLimit)
+            ),
+            right = max(
+                rightDynamics.process(rightRms, sensitivity, punch) * bassWeight(rightRms, rightFullRms),
+                rightAmbient.process(rightFullRms, ambientLimit)
+            )
         )
     }
 
@@ -124,12 +162,139 @@ class LowFrequencyAnalyzer(
         leftBandPass.reset()
         rightBandPass.reset()
         monoBandPass.reset()
+        leftDynamics.reset()
+        rightDynamics.reset()
+        monoDynamics.reset()
+        leftAmbient.reset()
+        rightAmbient.reset()
+        monoAmbient.reset()
     }
 
-    private fun rmsToDisplayLevel(rms: Float): Float {
-        if (rms <= 0.00001f) return 0f
-        val db = 20f * (ln(rms) / ln(10f))
-        return ((db + 54f) / 42f).coerceIn(0f, 1f)
+    private fun bassWeight(lowRms: Float, fullRms: Float): Float {
+        if (fullRms <= 0.00001f) return 0f
+        val ratio = (lowRms / fullRms).coerceIn(0f, 1f)
+        return ((ratio - 0.18f) / 0.22f).coerceIn(0f, 1f)
+    }
+}
+
+private class RhythmEnvelope {
+    private var floor = 0.0006f
+    private var peak = 0.018f
+    private var bodyEnvelope = 0f
+    private var fallEnvelope = 0f
+
+    fun process(rms: Float, sensitivity: Float, punch: Float): Float {
+        val cleanRms = if (rms.isFinite()) rms.coerceAtLeast(0f) else 0f
+        updateRange(cleanRms)
+
+        val range = max(MinDynamicRange, (peak - floor) * PeakHeadroom)
+        val normalized = (((cleanRms - floor) / range) * sensitivity).coerceIn(0f, 1f)
+        val attack = if (normalized > bodyEnvelope) BodyAttack else BodyRelease
+        val previousEnvelope = bodyEnvelope
+        bodyEnvelope += (normalized - bodyEnvelope) * attack
+
+        val body = normalized.powCompat(BodyGamma) * BodyWeight
+        val onset = (normalized - previousEnvelope - OnsetThreshold).coerceAtLeast(0f)
+        val pulse = (onset * PulseGain * punch).coerceIn(0f, 1f)
+        val target = (body + pulse * PulseWeight).coerceIn(0f, 1f)
+
+        fallEnvelope = max(fallEnvelope * FallRelease, target)
+        if (cleanRms < SilenceRms && bodyEnvelope < 0.02f) {
+            fallEnvelope *= SilenceRelease
+        }
+        return if (fallEnvelope < NoiseGate) 0f else fallEnvelope.coerceIn(0f, 1f)
+    }
+
+    fun reset() {
+        floor = 0.0006f
+        peak = 0.018f
+        bodyEnvelope = 0f
+        fallEnvelope = 0f
+    }
+
+    private fun updateRange(rms: Float) {
+        floor += (rms - floor) * if (rms < floor) FloorDownRate else FloorUpRate
+        floor = floor.coerceIn(0.0001f, 0.08f)
+
+        if (rms > peak) {
+            peak += (rms - peak) * PeakAttack
+        } else {
+            peak += (rms - peak) * PeakRelease
+        }
+        peak = peak.coerceAtLeast(floor + MinDynamicRange)
+    }
+
+    private fun Float.powCompat(power: Float): Float =
+        Math.pow(toDouble(), power.toDouble()).toFloat()
+
+    private companion object {
+        const val MinDynamicRange = 0.018f
+        const val FloorUpRate = 0.004f
+        const val FloorDownRate = 0.08f
+        const val PeakAttack = 0.72f
+        const val PeakRelease = 0.006f
+        const val PeakHeadroom = 2.25f
+        const val BodyAttack = 0.42f
+        const val BodyRelease = 0.16f
+        const val BodyGamma = 1.35f
+        const val BodyWeight = 0.72f
+        const val OnsetThreshold = 0.07f
+        const val PulseGain = 2.4f
+        const val PulseWeight = 0.55f
+        const val FallRelease = 0.82f
+        const val SilenceRelease = 0.35f
+        const val SilenceRms = 0.0009f
+        const val NoiseGate = 0.035f
+    }
+}
+
+private class AmbientEnvelope {
+    private var floor = 0.0015f
+    private var peak = 0.08f
+    private var envelope = 0f
+
+    fun process(fullRms: Float, limit: Float): Float {
+        if (limit <= 0f) return 0f
+        val cleanRms = if (fullRms.isFinite()) fullRms.coerceAtLeast(0f) else 0f
+        updateRange(cleanRms)
+
+        val range = max(MinDynamicRange, (peak - floor) * PeakHeadroom)
+        val normalized = ((cleanRms - floor) / range).coerceIn(0f, 1f)
+        val target = (normalized * limit).coerceIn(0f, limit.coerceIn(0f, MaxAmbientLimit))
+        val rate = if (target > envelope) Attack else Release
+        envelope += (target - envelope) * rate
+        return if (envelope < NoiseGate) 0f else envelope
+    }
+
+    fun reset() {
+        floor = 0.0015f
+        peak = 0.08f
+        envelope = 0f
+    }
+
+    private fun updateRange(rms: Float) {
+        floor += (rms - floor) * if (rms < floor) FloorDownRate else FloorUpRate
+        floor = floor.coerceIn(0.0004f, 0.12f)
+
+        if (rms > peak) {
+            peak += (rms - peak) * PeakAttack
+        } else {
+            peak += (rms - peak) * PeakRelease
+        }
+        peak = peak.coerceAtLeast(floor + MinDynamicRange)
+    }
+
+    private companion object {
+        const val MinDynamicRange = 0.04f
+        const val PeakHeadroom = 2.0f
+        const val FloorUpRate = 0.002f
+        const val FloorDownRate = 0.06f
+        const val PeakAttack = 0.35f
+        const val PeakRelease = 0.004f
+        const val Attack = 0.28f
+        const val Release = 0.08f
+        const val NoiseGate = 0.006f
+        const val MaxAmbientLimit = 0.4f
     }
 }
 
