@@ -6,7 +6,8 @@ enum class ControlMode(val wireValue: Int, val title: String) {
     Breath(2, "呼吸"),
     Disco(3, "Disco"),
     Gradient(4, "渐变"),
-    FlowGradient(5, "流动渐变");
+    FlowGradient(5, "流动渐变"),
+    MusicReactive(6, "音乐律动");
 
     companion object {
         fun fromWireValue(value: Int): ControlMode =

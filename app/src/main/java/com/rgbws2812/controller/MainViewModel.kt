@@ -3,6 +3,10 @@ package com.rgbws2812.controller
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.rgbws2812.controller.audio.AudioLevelCapture
+import com.rgbws2812.controller.audio.MusicReactiveMapper
+import com.rgbws2812.controller.audio.MusicReactiveRuntimeState
+import com.rgbws2812.controller.audio.MusicReactiveSettings
 import com.rgbws2812.controller.bluetooth.BluetoothSppClient
 import com.rgbws2812.controller.data.AppStorage
 import com.rgbws2812.controller.model.AppStorageState
@@ -15,6 +19,8 @@ import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.SendHistoryItem
 import com.rgbws2812.controller.protocol.RgbFrame
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
+import com.rgbws2812.controller.protocol.RealtimeFrame
+import com.rgbws2812.controller.protocol.RealtimeFrameBuilder
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +45,8 @@ data class MainUiState(
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList(),
     val bluetooth: BluetoothUiState = BluetoothUiState(),
+    val musicSettings: MusicReactiveSettings = MusicReactiveSettings(),
+    val musicRuntime: MusicReactiveRuntimeState = MusicReactiveRuntimeState(),
     val manualHex: String = "",
     val importExportText: String = "",
     val statusMessage: String? = null,
@@ -48,15 +56,33 @@ data class MainUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val storage = AppStorage(application)
     private val bluetoothClient = BluetoothSppClient(application)
+    private val audioCapture = AudioLevelCapture(application, viewModelScope)
     private val manualState = MutableStateFlow(ManualUiState())
+    private val musicState = MutableStateFlow(MusicUiState())
     private var autoSendJob: Job? = null
+    private var realtimeSendJob: Job? = null
+    private var realtimeSendInFlight = false
+    private var realtimeSequence = 0
 
     val uiState: StateFlow<MainUiState> =
-        combine(storage.state, bluetoothClient.state, manualState) { storageState, bluetoothState, manual ->
+        combine(
+            storage.state,
+            bluetoothClient.state,
+            manualState,
+            musicState,
+            audioCapture.state
+        ) { storageState, bluetoothState, manual, music, audio ->
             val effectiveControl = effectiveControl(storageState)
             val frame = RgbFrameBuilder.build(effectiveControl)
             val orderValid = RgbFrameBuilder.isValidOrder(storageState.control.order)
             val flowFramesValid = RgbFrameBuilder.isValidFlowFrames(effectiveControl.flowFrames)
+            val musicRuntime = MusicReactiveRuntimeState(
+                isRunning = music.isRunning,
+                level = audio.level,
+                sentFps = music.sentFps,
+                audioStatus = audio.statusMessage,
+                status = music.status
+            )
             MainUiState(
                 control = storageState.control,
                 effectiveControl = effectiveControl,
@@ -69,10 +95,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 presets = storageState.presets,
                 history = storageState.history,
                 bluetooth = bluetoothState,
+                musicSettings = music.settings,
+                musicRuntime = musicRuntime,
                 manualHex = manual.manualHex,
                 importExportText = manual.importExportText,
                 statusMessage = manual.statusMessage,
-                errorMessage = manual.errorMessage ?: bluetoothState.errorMessage
+                errorMessage = manual.errorMessage ?: audio.errorMessage ?: bluetoothState.errorMessage
             )
         }.stateIn(
             scope = viewModelScope,
@@ -100,7 +128,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bluetoothClient.disconnect()
     }
 
-    fun updateMode(mode: ControlMode) = updateControl { it.copy(mode = mode) }
+    fun updateMode(mode: ControlMode) {
+        if (mode != ControlMode.MusicReactive) stopMusicReactive()
+        updateControl { it.copy(mode = mode) }
+    }
 
     fun updateColor(red: Int, green: Int, blue: Int) =
         updateControl { it.copy(red = red, green = green, blue = blue) }
@@ -236,7 +267,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendCurrent() {
         viewModelScope.launch {
             val state = uiState.value
+            if (state.control.mode == ControlMode.MusicReactive) {
+                if (state.musicRuntime.isRunning) {
+                    stopMusicReactive()
+                } else {
+                    startMusicReactive()
+                }
+                return@launch
+            }
             sendFrame(state.frame, "手动发送")
+        }
+    }
+
+    fun setMusicMaxBrightness(value: Int) {
+        musicState.update { it.copy(settings = it.settings.copy(maxBrightness = value).clamped()) }
+    }
+
+    fun hasMicrophonePermission(): Boolean = audioCapture.hasMicrophonePermission()
+
+    fun startMusicReactive() {
+        val state = uiState.value
+        if (!hasMicrophonePermission()) {
+            manualState.update { it.copy(errorMessage = "需要录音权限后才能启动音乐律动") }
+            return
+        }
+        viewModelScope.launch {
+            storage.saveControl(state.control.copy(mode = ControlMode.MusicReactive).clamped())
+        }
+        val cleanSettings = state.musicSettings.clamped()
+        musicState.update {
+            it.copy(
+                settings = cleanSettings,
+                isRunning = true,
+                sentFps = 0,
+                sentThisSecond = 0,
+                fpsWindowStartedAt = System.currentTimeMillis(),
+                status = if (state.bluetooth.connectionState == BluetoothConnectionState.Connected) {
+                    "音乐律动运行中"
+                } else {
+                    "音乐律动预览中，未连接蓝牙"
+                }
+            )
+        }
+        audioCapture.start()
+        startRealtimeSender()
+    }
+
+    fun stopMusicReactive() {
+        realtimeSendJob?.cancel()
+        realtimeSendJob = null
+        realtimeSendInFlight = false
+        audioCapture.stop()
+        musicState.update {
+            it.copy(
+                isRunning = false,
+                sentFps = 0,
+                sentThisSecond = 0,
+                status = "音乐律动已停止"
+            )
         }
     }
 
@@ -356,6 +444,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        stopMusicReactive()
+        audioCapture.release()
         bluetoothClient.release()
         super.onCleared()
     }
@@ -373,6 +463,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val state = uiState.value
         if (!state.autoSendEnabled ||
             !state.flowFramesValid ||
+            state.control.mode == ControlMode.MusicReactive ||
             state.bluetooth.connectionState != BluetoothConnectionState.Connected
         ) {
             return
@@ -401,6 +492,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             manualState.update { it.copy(statusMessage = "$source 成功：${frame.spacedHex()}", errorMessage = null) }
         }.onFailure { throwable ->
             manualState.update { it.copy(errorMessage = throwable.message ?: "发送失败") }
+        }
+    }
+
+    private fun startRealtimeSender() {
+        realtimeSendJob?.cancel()
+        realtimeSendJob = viewModelScope.launch {
+            while (true) {
+                val state = uiState.value
+                val settings = state.musicSettings.clamped()
+                if (!state.musicRuntime.isRunning) {
+                    return@launch
+                }
+                if (!realtimeSendInFlight) {
+                    realtimeSendInFlight = true
+                    val frame = RealtimeFrameBuilder.build(
+                        leds = MusicReactiveMapper.ledsForLevel(state.musicRuntime.level),
+                        maxBrightness = settings.maxBrightness,
+                        sequence = realtimeSequence++
+                    )
+                    if (state.bluetooth.connectionState == BluetoothConnectionState.Connected) {
+                        sendRealtimeFrame(frame)
+                    } else {
+                        updateRealtimePreviewTick()
+                    }
+                    realtimeSendInFlight = false
+                }
+                delay((1_000L / settings.targetFps.coerceIn(1, 25)).coerceAtLeast(40L))
+            }
+        }
+    }
+
+    private fun updateRealtimePreviewTick() {
+        musicState.update { current ->
+            val now = System.currentTimeMillis()
+            val elapsed = now - current.fpsWindowStartedAt
+            if (elapsed >= 1_000L) {
+                val fps = current.sentThisSecond + 1
+                current.copy(
+                    sentFps = fps,
+                    sentThisSecond = 1,
+                    fpsWindowStartedAt = now,
+                    status = "音乐律动预览中，未连接蓝牙"
+                )
+            } else {
+                current.copy(sentThisSecond = current.sentThisSecond + 1)
+            }
+        }
+    }
+
+    private suspend fun sendRealtimeFrame(frame: RealtimeFrame) {
+        val result = bluetoothClient.send(frame.bytes)
+        result.onSuccess {
+            musicState.update { current ->
+                val now = System.currentTimeMillis()
+                val elapsed = now - current.fpsWindowStartedAt
+                if (elapsed >= 1_000L) {
+                    val sentFps = current.sentThisSecond + 1
+                    current.copy(
+                        sentFps = sentFps,
+                        sentThisSecond = 1,
+                        fpsWindowStartedAt = now,
+                        status = "音乐律动运行中：$sentFps FPS"
+                    )
+                } else {
+                    current.copy(sentThisSecond = current.sentThisSecond + 1)
+                }
+            }
+        }.onFailure { throwable ->
+            stopMusicReactive()
+            manualState.update { it.copy(errorMessage = throwable.message ?: "实时发送失败") }
         }
     }
 
@@ -435,4 +596,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val statusMessage: String? = null,
         val errorMessage: String? = null
     )
+
+    private data class MusicUiState(
+        val settings: MusicReactiveSettings = MusicReactiveSettings(),
+        val isRunning: Boolean = false,
+        val sentFps: Int = 0,
+        val sentThisSecond: Int = 0,
+        val fpsWindowStartedAt: Long = System.currentTimeMillis(),
+        val status: String = "音乐律动未启动"
+    )
+
 }

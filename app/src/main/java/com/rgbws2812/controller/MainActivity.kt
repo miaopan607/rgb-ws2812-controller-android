@@ -174,7 +174,8 @@ private val PrimaryControlModes = listOf(
     ControlMode.Flow,
     ControlMode.Breath,
     ControlMode.Disco,
-    ControlMode.Gradient
+    ControlMode.Gradient,
+    ControlMode.MusicReactive
 )
 private val FlowOrderPresets = listOf(
     "正序" to listOf(3, 2, 1, 0, 4, 5, 6, 7),
@@ -247,6 +248,9 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
     var currentPage by remember { mutableStateOf(AppPage.Controller) }
     var previewVisible by rememberSaveable { mutableStateOf(false) }
     var predictiveBackProgress by remember { mutableStateOf(0f) }
+    var microphonePermissionGranted by remember {
+        mutableStateOf(viewModel.hasMicrophonePermission())
+    }
     val isPredictiveBackInProgress = predictiveBackProgress > 0f
     val navigateBackToController = {
         predictiveBackProgress = 0f
@@ -262,6 +266,22 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
         bluetoothPermissionsGranted = permissions.all { result[it] == true } || context.hasBluetoothPermissions(permissions)
         if (bluetoothPermissionsGranted) {
             viewModel.refreshBluetooth()
+        }
+    }
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        microphonePermissionGranted = granted || viewModel.hasMicrophonePermission()
+        if (granted) viewModel.clearMessages()
+    }
+    val handleSendClick = {
+        if (uiState.control.mode == ControlMode.MusicReactive &&
+            !uiState.musicRuntime.isRunning &&
+            !viewModel.hasMicrophonePermission()
+        ) {
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            viewModel.sendCurrent()
         }
     }
 
@@ -305,11 +325,13 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                 if (page == AppPage.Controller) {
                     ControllerTopBar(
                         connectionState = uiState.bluetooth.connectionState,
+                        currentMode = uiState.control.mode,
+                        musicRunning = uiState.musicRuntime.isRunning,
                         flowFramesValid = uiState.flowFramesValid,
                         autoSendEnabled = uiState.autoSendEnabled,
                         showAdvancedSendPanel = uiState.showAdvancedSendPanel,
                         previewVisible = previewVisible,
-                        onSendClick = { viewModel.sendCurrent() },
+                        onSendClick = handleSendClick,
                         onPreviewClick = { previewVisible = true },
                         onBluetoothClick = { currentPage = AppPage.Bluetooth },
                         onToggleAutoSend = { viewModel.setAutoSend(it) },
@@ -337,7 +359,11 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                     state = uiState,
                     viewModel = viewModel,
                     previewVisible = previewVisible,
-                    onClosePreview = { previewVisible = false }
+                    microphonePermissionGranted = microphonePermissionGranted,
+                    onClosePreview = { previewVisible = false },
+                    onRequestMicrophonePermission = {
+                        microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 )
                 BluetoothContent(
                     modifier = Modifier
@@ -366,7 +392,11 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                         state = uiState,
                         viewModel = viewModel,
                         previewVisible = previewVisible,
-                        onClosePreview = { previewVisible = false }
+                        microphonePermissionGranted = microphonePermissionGranted,
+                        onClosePreview = { previewVisible = false },
+                        onRequestMicrophonePermission = {
+                            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
                     )
 
                     AppPage.Bluetooth -> BluetoothContent(
@@ -390,7 +420,9 @@ private fun ControllerContent(
     state: MainUiState,
     viewModel: MainViewModel,
     previewVisible: Boolean,
-    onClosePreview: () -> Unit
+    microphonePermissionGranted: Boolean,
+    onClosePreview: () -> Unit,
+    onRequestMicrophonePermission: () -> Unit
 ) {
     ControllerPage(
         modifier = modifier,
@@ -412,6 +444,9 @@ private fun ControllerContent(
         onDeleteFlowFrame = { viewModel.deleteFlowFrame(it) },
         onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
         onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
+        onMusicMaxBrightness = { viewModel.setMusicMaxBrightness(it) },
+        microphonePermissionGranted = microphonePermissionGranted,
+        onRequestMicrophonePermission = onRequestMicrophonePermission,
         onSend = { viewModel.sendCurrent() },
         onManualHex = { viewModel.updateManualHex(it) },
         onLoadCurrentFrame = { viewModel.loadCurrentFrameToManualHex() },
@@ -502,6 +537,9 @@ private fun ControllerPage(
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
+    onMusicMaxBrightness: (Int) -> Unit,
+    microphonePermissionGranted: Boolean,
+    onRequestMicrophonePermission: () -> Unit,
     onSend: () -> Unit,
     onManualHex: (String) -> Unit,
     onLoadCurrentFrame: () -> Unit,
@@ -526,7 +564,7 @@ private fun ControllerPage(
         if (previewVisible && isLandscape) {
             Row(modifier = Modifier.fillMaxSize()) {
                 LedPreviewPanel(
-                    state = state.effectiveControl,
+                    state = state,
                     isLandscape = true,
                     onClose = onClosePreview,
                     modifier = Modifier
@@ -552,6 +590,9 @@ private fun ControllerPage(
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
+                    onMusicMaxBrightness = onMusicMaxBrightness,
+                    microphonePermissionGranted = microphonePermissionGranted,
+                    onRequestMicrophonePermission = onRequestMicrophonePermission,
                     onSend = onSend,
                     onManualHex = onManualHex,
                     onLoadCurrentFrame = onLoadCurrentFrame,
@@ -587,6 +628,9 @@ private fun ControllerPage(
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
+                    onMusicMaxBrightness = onMusicMaxBrightness,
+                    microphonePermissionGranted = microphonePermissionGranted,
+                    onRequestMicrophonePermission = onRequestMicrophonePermission,
                     onSend = onSend,
                     onManualHex = onManualHex,
                     onLoadCurrentFrame = onLoadCurrentFrame,
@@ -602,7 +646,7 @@ private fun ControllerPage(
                     onImport = onImport
                 )
                 LedPreviewPanel(
-                    state = state.effectiveControl,
+                    state = state,
                     isLandscape = false,
                     onClose = onClosePreview,
                     modifier = Modifier
@@ -630,6 +674,9 @@ private fun ControllerPage(
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown,
+                onMusicMaxBrightness = onMusicMaxBrightness,
+                microphonePermissionGranted = microphonePermissionGranted,
+                onRequestMicrophonePermission = onRequestMicrophonePermission,
                 onSend = onSend,
                 onManualHex = onManualHex,
                 onLoadCurrentFrame = onLoadCurrentFrame,
@@ -667,6 +714,9 @@ private fun ControllerPageList(
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
+    onMusicMaxBrightness: (Int) -> Unit,
+    microphonePermissionGranted: Boolean,
+    onRequestMicrophonePermission: () -> Unit,
     onSend: () -> Unit,
     onManualHex: (String) -> Unit,
     onLoadCurrentFrame: () -> Unit,
@@ -705,7 +755,12 @@ private fun ControllerPageList(
                 onAddFlowFrame = onAddFlowFrame,
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
-                onMoveFlowFrameDown = onMoveFlowFrameDown
+                onMoveFlowFrameDown = onMoveFlowFrameDown,
+                musicSettings = state.musicSettings,
+                musicRuntime = state.musicRuntime,
+                microphonePermissionGranted = microphonePermissionGranted,
+                onMusicMaxBrightness = onMusicMaxBrightness,
+                onRequestMicrophonePermission = onRequestMicrophonePermission,
             )
         }
         if (state.showAdvancedSendPanel) {
@@ -815,6 +870,8 @@ private fun BluetoothConnectionPage(
 @Composable
 private fun ControllerTopBar(
     connectionState: BluetoothConnectionState,
+    currentMode: ControlMode,
+    musicRunning: Boolean,
     flowFramesValid: Boolean,
     autoSendEnabled: Boolean,
     showAdvancedSendPanel: Boolean,
@@ -828,7 +885,8 @@ private fun ControllerTopBar(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
-    val sendEnabled = flowFramesValid && connectionState == BluetoothConnectionState.Connected
+    val isMusicMode = currentMode == ControlMode.MusicReactive
+    val sendEnabled = if (isMusicMode) true else flowFramesValid && connectionState == BluetoothConnectionState.Connected
 
     if (showResetConfirm) {
         AlertDialog(
@@ -859,7 +917,9 @@ private fun ControllerTopBar(
             IconButton(onClick = onSendClick, enabled = sendEnabled) {
                 SendPlaneIcon(
                     modifier = Modifier.size(21.dp),
-                    color = if (sendEnabled) {
+                    color = if (isMusicMode && musicRunning) {
+                        MaterialTheme.colorScheme.error
+                    } else if (sendEnabled) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
                         MaterialTheme.colorScheme.outline
@@ -1028,23 +1088,24 @@ private fun BluetoothTopBar(onBack: () -> Unit) {
 
 @Composable
 private fun LedPreviewPanel(
-    state: RgbControlState,
+    state: MainUiState,
     isLandscape: Boolean,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cleanFrames = RgbControlState.sanitizeFlowFrames(state.flowFrames)
-    val animationDurationMillis = when (state.mode) {
-        ControlMode.Breath -> (state.breathPeriod.coerceIn(1, 255) * 20).coerceAtLeast(40)
-        ControlMode.Flow -> (cleanFrames.size * state.flowInterval.coerceIn(1, 255) * 10).coerceAtLeast(10)
+    val control = state.effectiveControl
+    val cleanFrames = RgbControlState.sanitizeFlowFrames(control.flowFrames)
+    val animationDurationMillis = when (control.mode) {
+        ControlMode.Breath -> (control.breathPeriod.coerceIn(1, 255) * 20).coerceAtLeast(40)
+        ControlMode.Flow -> (cleanFrames.size * control.flowInterval.coerceIn(1, 255) * 10).coerceAtLeast(10)
         ControlMode.Disco -> 8 * LedPreviewDiscoStepMillis
         ControlMode.Gradient,
-        ControlMode.FlowGradient -> (state.gradientPeriod.coerceIn(1, 255) * 50).coerceAtLeast(50)
+        ControlMode.FlowGradient -> (control.gradientPeriod.coerceIn(1, 255) * 50).coerceAtLeast(50)
         else -> LedPreviewDiscoStepMillis
     }
     var progress by remember { mutableStateOf(0f) }
 
-    LaunchedEffect(state.mode, state.flowInterval, state.breathPeriod, state.gradientPeriod, cleanFrames) {
+    LaunchedEffect(control.mode, control.flowInterval, control.breathPeriod, control.gradientPeriod, cleanFrames) {
         val startMillis = withFrameMillis { it }
         while (true) {
             val frameMillis = withFrameMillis { it }
@@ -1056,11 +1117,11 @@ private fun LedPreviewPanel(
     val frameIndex = ((progress * cleanFrames.size).toInt()).coerceIn(0, cleanFrames.lastIndex)
     val discoPhase = ((progress * 8f).toInt()).coerceIn(0, 7)
     val gradientPhase = ((progress * GradientPattern.PhaseCount).toInt()).coerceIn(0, GradientPattern.PhaseCount - 1)
-    val activeMask = when (state.mode) {
+    val activeMask = when (control.mode) {
         ControlMode.Flow -> cleanFrames[frameIndex]
         else -> 0xFF
     }
-    val brightnessPhase = when (state.mode) {
+    val brightnessPhase = when (control.mode) {
         ControlMode.Breath -> {
             if (progress < 0.5f) {
                 progress * 2f
@@ -1070,9 +1131,12 @@ private fun LedPreviewPanel(
         }
         else -> 1f
     }
-    val displayMaxBrightness = (state.brightness.coerceIn(0, 255) / 255f).pow(LedPreviewGamma)
+    val displayMaxBrightness = (control.brightness.coerceIn(0, 255) / 255f).pow(LedPreviewGamma)
     val brightnessFactor = brightnessPhase * displayMaxBrightness
-    val baseColor = Color(state.red.coerceIn(0, 255), state.green.coerceIn(0, 255), state.blue.coerceIn(0, 255))
+    val baseColor = Color(control.red.coerceIn(0, 255), control.green.coerceIn(0, 255), control.blue.coerceIn(0, 255))
+    val realtimeLeds = remember(state.musicRuntime.level) {
+        com.rgbws2812.controller.audio.MusicReactiveMapper.ledsForLevel(state.musicRuntime.level)
+    }
     val dividerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
 
     Box(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
@@ -1097,8 +1161,9 @@ private fun LedPreviewPanel(
                     baseColor = baseColor,
                     discoPhase = discoPhase,
                     gradientPhase = gradientPhase,
-                    mode = state.mode,
+                    mode = control.mode,
                     brightnessFactor = brightnessFactor,
+                    realtimeLeds = if (control.mode == ControlMode.MusicReactive) realtimeLeds else null,
                     modifier = Modifier.size(LedPreviewGridWidth, LedPreviewGridHeight)
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1127,8 +1192,9 @@ private fun LedPreviewPanel(
                     baseColor = baseColor,
                     discoPhase = discoPhase,
                     gradientPhase = gradientPhase,
-                    mode = state.mode,
+                    mode = control.mode,
                     brightnessFactor = brightnessFactor,
+                    realtimeLeds = if (control.mode == ControlMode.MusicReactive) realtimeLeds else null,
                     modifier = Modifier.size(LedPreviewGridWidth, LedPreviewGridHeight)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -1148,6 +1214,7 @@ private fun LedPreviewGrid(
     gradientPhase: Int,
     mode: ControlMode,
     brightnessFactor: Float,
+    realtimeLeds: List<com.rgbws2812.controller.protocol.RealtimeLed>? = null,
     modifier: Modifier = Modifier
 ) {
     val offColor = MaterialTheme.colorScheme.surfaceVariant
@@ -1172,16 +1239,27 @@ private fun LedPreviewGrid(
                 x = startX + column * (diameter + columnGap),
                 y = startY + row * (diameter + rowGap)
             )
-            val selected = (activeMask and (1 shl led)) != 0
-            val ledColor = previewLedColor(mode = mode, baseColor = baseColor, led = led, discoPhase = discoPhase, gradientPhase = gradientPhase)
+            val realtimeLed = realtimeLeds?.getOrNull(led)
+            val selected = if (realtimeLed != null) {
+                realtimeLed.level > 0
+            } else {
+                (activeMask and (1 shl led)) != 0
+            }
+            val ledColor = realtimeLed?.let {
+                Color(it.red.coerceIn(0, 255), it.green.coerceIn(0, 255), it.blue.coerceIn(0, 255))
+            } ?: previewLedColor(mode = mode, baseColor = baseColor, led = led, discoPhase = discoPhase, gradientPhase = gradientPhase)
+            val ledBrightness = realtimeLed?.let {
+                val maxBrightness = 0.22f + 0.78f * (brightnessFactor.coerceIn(0f, 1f))
+                (it.level.coerceIn(0, 255) / 255f) * maxBrightness
+            } ?: displayBrightness
             if (selected) {
                 drawCircle(
-                    color = ledColor.copy(alpha = (0.14f + 0.32f * displayBrightness).coerceIn(0f, 0.6f)),
+                    color = ledColor.copy(alpha = (0.14f + 0.32f * ledBrightness).coerceIn(0f, 0.6f)),
                     radius = radius * 1.55f,
                     center = center
                 )
                 drawCircle(
-                    color = ledColor.copy(alpha = displayBrightness),
+                    color = ledColor.copy(alpha = ledBrightness.coerceIn(0f, 1f)),
                     radius = radius,
                     center = center
                 )
@@ -1391,7 +1469,12 @@ private fun ControlSection(
     onAddFlowFrame: () -> Unit,
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
-    onMoveFlowFrameDown: (Int) -> Unit
+    onMoveFlowFrameDown: (Int) -> Unit,
+    musicSettings: com.rgbws2812.controller.audio.MusicReactiveSettings,
+    musicRuntime: com.rgbws2812.controller.audio.MusicReactiveRuntimeState,
+    microphonePermissionGranted: Boolean,
+    onMusicMaxBrightness: (Int) -> Unit,
+    onRequestMicrophonePermission: () -> Unit
 ) {
     AppSection(title = "控制参数") {
         SectionSubheading("模式")
@@ -1429,6 +1512,16 @@ private fun ControlSection(
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
+        }
+        if (state.mode == ControlMode.MusicReactive) {
+            MusicReactiveControls(
+                settings = musicSettings,
+                runtime = musicRuntime,
+                microphonePermissionGranted = microphonePermissionGranted,
+                onMaxBrightness = onMusicMaxBrightness,
+                onRequestMicrophonePermission = onRequestMicrophonePermission
+            )
+            return@AppSection
         }
         if (state.mode != ControlMode.Disco && !state.mode.isGradientFamily) {
             ColorControls(state = state, onColor = onColor)
@@ -1489,6 +1582,102 @@ private fun ControlSection(
 
 private fun selectedPrimaryMode(mode: ControlMode): ControlMode =
     if (mode.isGradientFamily) ControlMode.Gradient else mode
+
+@Composable
+private fun MusicReactiveControls(
+    settings: com.rgbws2812.controller.audio.MusicReactiveSettings,
+    runtime: com.rgbws2812.controller.audio.MusicReactiveRuntimeState,
+    microphonePermissionGranted: Boolean,
+    onMaxBrightness: (Int) -> Unit,
+    onRequestMicrophonePermission: () -> Unit
+) {
+    SectionSubheading("音频源")
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = if (microphonePermissionGranted) "麦克风可用" else "麦克风需要录音权限",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (!microphonePermissionGranted) {
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onRequestMicrophonePermission) {
+            Text("授权录音权限")
+        }
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+    NumberSlider(
+        label = "最大亮度",
+        value = settings.maxBrightness,
+        range = 0..255,
+        onValue = onMaxBrightness
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    SectionSubheading("实时电平")
+    Spacer(modifier = Modifier.height(8.dp))
+    StereoMeter(level = runtime.level)
+    Spacer(modifier = Modifier.height(12.dp))
+    Text(
+        text = if (runtime.isRunning) "${runtime.status}，${runtime.sentFps} FPS" else "使用右上角发送按钮开始",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (runtime.audioStatus.isNotBlank()) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = runtime.audioStatus,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun StereoMeter(level: com.rgbws2812.controller.audio.StereoLevel) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MeterRow(label = "L", value = level.left)
+        MeterRow(label = "R", value = level.right)
+    }
+}
+
+@Composable
+private fun MeterRow(label: String, value: Float) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, modifier = Modifier.width(16.dp), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+        Canvas(
+            modifier = Modifier
+                .weight(1f)
+                .height(22.dp)
+        ) {
+            val gap = 4.dp.toPx()
+            val segmentWidth = (size.width - gap * 3f) / 4f
+            val colors = listOf(
+                Color(0xFF22C55E),
+                Color(0xFFA3E635),
+                Color(0xFFF97316),
+                Color(0xFFEF4444)
+            )
+            val scaled = value.coerceIn(0f, 1f) * 4f
+            repeat(4) { index ->
+                val left = index * (segmentWidth + gap)
+                val fill = (scaled - index).coerceIn(0f, 1f)
+                drawRoundRect(
+                    color = colors[index].copy(alpha = 0.18f),
+                    topLeft = Offset(left, 0f),
+                    size = androidx.compose.ui.geometry.Size(segmentWidth, size.height),
+                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                )
+                if (fill > 0f) {
+                    drawRoundRect(
+                        color = colors[index],
+                        topLeft = Offset(left, 0f),
+                        size = androidx.compose.ui.geometry.Size(segmentWidth * fill, size.height),
+                        cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    )
+                }
+            }
+        }
+    }
+}
 
 private fun durationSecondsText(durationMillis: Int): String {
     val seconds = durationMillis / 1000f
