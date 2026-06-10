@@ -42,8 +42,9 @@ data class RgbControlState(
         const val DefaultBreathPeriod = 100
         const val DefaultGradientPeriod = 20
         const val DefaultUnusedPeriod = 20
+        val EmptyFlowFrames = listOf(0)
         val DefaultOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
-        val DefaultFlowFrames = orderToFlowFrames(DefaultOrder)
+        val DefaultFlowFrames = EmptyFlowFrames
         val Default = RgbControlState()
 
         fun orderToFlowFrames(order: List<Int>): List<Int> =
@@ -56,6 +57,6 @@ data class RgbControlState(
         fun sanitizeFlowFrames(frames: List<Int>): List<Int> =
             frames.take(MaxFlowFrames)
                 .map { it.coerceIn(0, 255) }
-                .ifEmpty { DefaultFlowFrames }
+                .ifEmpty { EmptyFlowFrames }
     }
 }

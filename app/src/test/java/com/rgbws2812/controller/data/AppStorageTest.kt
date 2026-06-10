@@ -1,6 +1,7 @@
 package com.rgbws2812.controller.data
 
 import com.rgbws2812.controller.model.ControlMode
+import com.rgbws2812.controller.model.RgbControlState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -47,5 +48,44 @@ class AppStorageTest {
         assertEquals(20, decoded.flowInterval)
         assertEquals(20, decoded.breathPeriod)
         assertEquals(20, decoded.gradientPeriod)
+    }
+
+    @Test
+    fun decodeControlUsesSingleEmptyFrameWhenFlowFramesAreMissing() {
+        val decoded = AppStorage.decodeControl(
+            """
+            {
+              "mode": 1,
+              "red": 0,
+              "green": 255,
+              "blue": 0,
+              "brightness": 17,
+              "flowInterval": 25,
+              "order": [3, 2, 1, 0, 4, 5, 6, 7]
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(RgbControlState.DefaultOrder, decoded.order)
+        assertEquals(RgbControlState.EmptyFlowFrames, decoded.flowFrames)
+    }
+
+    @Test
+    fun decodeControlKeepsExplicitAdvancedFlowFrames() {
+        val decoded = AppStorage.restoreControlState(
+            modeValue = ControlMode.Flow.wireValue,
+            red = 0,
+            green = 255,
+            blue = 0,
+            brightness = 17,
+            flowInterval = 25,
+            breathPeriod = Int.MIN_VALUE,
+            gradientPeriod = Int.MIN_VALUE,
+            legacyPeriod = Int.MIN_VALUE,
+            order = RgbControlState.DefaultOrder,
+            flowFrames = listOf(3, 12, 48, 192)
+        )
+
+        assertEquals(listOf(3, 12, 48, 192), decoded.flowFrames)
     }
 }

@@ -32,7 +32,8 @@ class RgbFrameBuilderTest {
         val frame = RgbFrameBuilder.build(RgbControlState.Default)
 
         assertEquals(0x19, frame.period)
-        assertEquals("AA 55 01 00 FF 00 11 19 08 08 04 02 01 10 20 40 80 01", frame.spacedHex())
+        assertEquals(listOf(0x00), frame.flowFrames)
+        assertEquals("AA 55 01 00 FF 00 11 19 01 00 F7", frame.spacedHex())
     }
 
     @Test

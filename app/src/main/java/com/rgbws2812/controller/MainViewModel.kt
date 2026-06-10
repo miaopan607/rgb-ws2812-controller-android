@@ -123,14 +123,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 mutable.add(led)
             }
             val order = mutable.filter { it in 0..7 }.distinct().take(RgbControlState.MaxFlowFrames)
-            current.copy(order = order, flowFrames = RgbFrameBuilder.orderToFlowFrames(order))
+            current.copy(order = order)
         }
     }
 
     fun setOrder(order: List<Int>) {
         updateControl {
             val cleanOrder = order.filter { value -> value in 0..7 }.distinct().take(RgbControlState.MaxFlowFrames)
-            it.copy(order = cleanOrder, flowFrames = RgbFrameBuilder.orderToFlowFrames(cleanOrder))
+            it.copy(order = cleanOrder)
+        }
+    }
+
+    fun generateFlowFramesFromOrder() {
+        updateControl { current ->
+            current.copy(flowFrames = RgbFrameBuilder.orderToFlowFrames(current.order))
         }
     }
 

@@ -394,6 +394,7 @@ private fun ControllerContent(
         onOrder = { viewModel.setOrder(it) },
         onToggleFlowFrameLed = { frameIndex, led -> viewModel.toggleFlowFrameLed(frameIndex, led) },
         onFlowFrames = { viewModel.setFlowFrames(it) },
+        onGenerateFlowFramesFromOrder = { viewModel.generateFlowFramesFromOrder() },
         onAddFlowFrame = { viewModel.addFlowFrame() },
         onDeleteFlowFrame = { viewModel.deleteFlowFrame(it) },
         onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
@@ -482,6 +483,7 @@ private fun ControllerPage(
     onOrder: (List<Int>) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
+    onGenerateFlowFramesFromOrder: () -> Unit,
     onAddFlowFrame: () -> Unit,
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
@@ -530,6 +532,7 @@ private fun ControllerPage(
                     onOrder = onOrder,
                     onToggleFlowFrameLed = onToggleFlowFrameLed,
                     onFlowFrames = onFlowFrames,
+                    onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
                     onAddFlowFrame = onAddFlowFrame,
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
@@ -563,6 +566,7 @@ private fun ControllerPage(
                     onOrder = onOrder,
                     onToggleFlowFrameLed = onToggleFlowFrameLed,
                     onFlowFrames = onFlowFrames,
+                    onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
                     onAddFlowFrame = onAddFlowFrame,
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
@@ -604,6 +608,7 @@ private fun ControllerPage(
                 onOrder = onOrder,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
                 onFlowFrames = onFlowFrames,
+                onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
                 onAddFlowFrame = onAddFlowFrame,
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
@@ -639,6 +644,7 @@ private fun ControllerPageList(
     onOrder: (List<Int>) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
+    onGenerateFlowFramesFromOrder: () -> Unit,
     onAddFlowFrame: () -> Unit,
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
@@ -677,6 +683,7 @@ private fun ControllerPageList(
                 onOrder = onOrder,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
                 onFlowFrames = onFlowFrames,
+                onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
                 onAddFlowFrame = onAddFlowFrame,
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
@@ -1252,6 +1259,7 @@ private fun ControlSection(
     onOrder: (List<Int>) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
+    onGenerateFlowFramesFromOrder: () -> Unit,
     onAddFlowFrame: () -> Unit,
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
@@ -1340,6 +1348,7 @@ private fun ControlSection(
                 onOrder = onOrder,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
                 onFlowFrames = onFlowFrames,
+                onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
                 onAddFlowFrame = onAddFlowFrame,
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
@@ -2072,6 +2081,7 @@ private fun FlowOrderEditor(
     onOrder: (List<Int>) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
+    onGenerateFlowFramesFromOrder: () -> Unit,
     onAddFlowFrame: () -> Unit,
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
@@ -2099,10 +2109,10 @@ private fun FlowOrderEditor(
         )
     } else {
         AdvancedFlowFrameEditor(
-            order = order,
             flowFrames = flowFrames,
             onToggleFlowFrameLed = onToggleFlowFrameLed,
             onFlowFrames = onFlowFrames,
+            onGenerateFlowFramesFromOrder = onGenerateFlowFramesFromOrder,
             onAddFlowFrame = onAddFlowFrame,
             onDeleteFlowFrame = onDeleteFlowFrame,
             onMoveFlowFrameUp = onMoveFlowFrameUp,
@@ -2163,7 +2173,7 @@ private fun BasicFlowOrderEditor(
     }
     Spacer(modifier = Modifier.height(6.dp))
     Text(
-        "基础流水会转换为每个画面只亮一颗灯的新版协议。",
+        "基础流水顺序单独保存；点击“用基础灯序生成”后才会覆盖高级画面。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -2179,17 +2189,17 @@ private fun BasicFlowOrderEditor(
 
 @Composable
 private fun AdvancedFlowFrameEditor(
-    order: List<Int>,
     flowFrames: List<Int>,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
     onFlowFrames: (List<Int>) -> Unit,
+    onGenerateFlowFramesFromOrder: () -> Unit,
     onAddFlowFrame: () -> Unit,
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit
 ) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { onFlowFrames(RgbFrameBuilder.orderToFlowFrames(order)) }) { Text("用基础灯序生成") }
+        OutlinedButton(onClick = onGenerateFlowFramesFromOrder) { Text("用基础灯序生成") }
         OutlinedButton(onClick = { onFlowFrames(List(RgbControlState.MaxFlowFrames) { 0xFF }) }) { Text("全亮") }
         OutlinedButton(onClick = { onFlowFrames(List(RgbControlState.MaxFlowFrames) { 0x00 }) }) { Text("全灭") }
     }

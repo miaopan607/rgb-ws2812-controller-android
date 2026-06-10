@@ -129,8 +129,7 @@ class AppStorage(
             }
             val flowFramesJson = json.optJSONArray("flowFrames")
             val flowFrames = if (flowFramesJson == null) {
-                // 兼容旧版预设：旧灯序在新版协议中转换为单 bit 流水画面。
-                RgbControlState.orderToFlowFrames(order)
+                RgbControlState.EmptyFlowFrames
             } else {
                 List(flowFramesJson.length()) { index -> flowFramesJson.optInt(index, 0) }
             }
