@@ -150,6 +150,7 @@ private val LedPreviewColumnGap = LedPreviewDiameter * 1.5f
 private val LedPreviewRowGap = LedPreviewDiameter
 private val LedPreviewGridWidth = LedPreviewDiameter * 4f + LedPreviewColumnGap * 3f
 private val LedPreviewGridHeight = LedPreviewDiameter * 2f + LedPreviewRowGap
+private val SectionHorizontalPadding = 20.dp
 
 private val DisplayToHardwareOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
 private val WorkbenchTabs = listOf("预设", "历史", "导入导出")
@@ -659,7 +660,7 @@ private fun ControllerPageList(
 ) {
     LazyColumn(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         item {
             Spacer(modifier = Modifier.height(4.dp))
@@ -736,7 +737,7 @@ private fun BluetoothConnectionPage(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         item {
             Spacer(modifier = Modifier.height(4.dp))
@@ -750,7 +751,7 @@ private fun BluetoothConnectionPage(
             )
         }
         item {
-            AppCard(title = "选择设备") {
+            AppSection(title = "选择设备") {
                 TabRow(selectedTabIndex = selectedTab) {
                     BluetoothTabs.forEachIndexed { index, title ->
                         Tab(
@@ -1090,7 +1091,7 @@ private fun BluetoothStatusPanel(
     onRequestPermission: () -> Unit,
     onDisconnect: () -> Unit
 ) {
-    AppCard(title = "连接状态") {
+    AppSection(title = "连接状态") {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(
                 modifier = Modifier
@@ -1193,34 +1194,43 @@ private fun DeviceList(
         return
     }
     val visibleDevices = remember(devices) { devices.take(MaxInlineDevices) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        visibleDevices.forEach { device ->
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-                color = if (connectedAddress == device.address) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surface
-                }
+    Column {
+        visibleDevices.forEachIndexed { index, device ->
+            val connected = connectedAddress == device.address
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(device.displayName, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(device.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Button(onClick = { onConnect(device) }) {
-                        Text(if (connectedAddress == device.address) "重连" else "连接")
-                    }
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        device.displayName,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(device.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                Button(onClick = { onConnect(device) }) {
+                    Text(if (connected) "重连" else "连接")
+                }
+            }
+            if (index < visibleDevices.lastIndex) {
+                Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
             }
         }
         if (devices.size > MaxInlineDevices) {
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 "还有 ${devices.size - MaxInlineDevices} 个设备未展开，继续扫描或刷新后可按名称识别",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1248,8 +1258,8 @@ private fun ControlSection(
     onMoveFlowFrameDown: (Int) -> Unit,
     onAutoSend: (Boolean) -> Unit
 ) {
-    AppCard(title = "控制参数") {
-        Text("模式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    AppSection(title = "控制参数") {
+        SectionSubheading("模式")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PrimaryControlModes.forEach { mode ->
                 FilterChip(
@@ -1269,7 +1279,7 @@ private fun ControlSection(
         }
         Spacer(modifier = Modifier.height(14.dp))
         if (state.mode.isGradientFamily) {
-            Text("渐变细分", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            SectionSubheading("渐变细分")
             Spacer(modifier = Modifier.height(8.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(
@@ -1385,7 +1395,7 @@ private fun ColorControls(
     val hueColor = colorForHue(displayHue)
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("颜色", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+        SectionSubheading("颜色")
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
             BasicColors.forEach { color ->
@@ -2185,67 +2195,67 @@ private fun AdvancedFlowFrameEditor(
     }
     Spacer(modifier = Modifier.height(8.dp))
     flowFrames.forEachIndexed { frameIndex, mask ->
-        Surface(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                .padding(vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text("画面 ${frameIndex + 1}", fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(mask.coerceIn(0, 255).toHexByte(), fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        IconButton(
-                            enabled = frameIndex > 0,
-                            onClick = { onMoveFlowFrameUp(frameIndex) }
-                        ) {
-                            MoveFrameIcon(up = true, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
-                        }
-                        IconButton(
-                            enabled = frameIndex < flowFrames.lastIndex,
-                            onClick = { onMoveFlowFrameDown(frameIndex) }
-                        ) {
-                            MoveFrameIcon(up = false, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
-                        }
-                        IconButton(
-                            enabled = flowFrames.size > 1,
-                            onClick = { onDeleteFlowFrame(frameIndex) }
-                        ) {
-                            DeleteFrameIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.error)
-                        }
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text("画面 ${frameIndex + 1}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(mask.coerceIn(0, 255).toHexByte(), fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    IconButton(
+                        enabled = frameIndex > 0,
+                        onClick = { onMoveFlowFrameUp(frameIndex) }
+                    ) {
+                        MoveFrameIcon(up = true, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(
+                        enabled = frameIndex < flowFrames.lastIndex,
+                        onClick = { onMoveFlowFrameDown(frameIndex) }
+                    ) {
+                        MoveFrameIcon(up = false, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(
+                        enabled = flowFrames.size > 1,
+                        onClick = { onDeleteFlowFrame(frameIndex) }
+                    ) {
+                        DeleteFrameIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.error)
                     }
                 }
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(
-                        modifier = Modifier
-                            .widthIn(max = FlowEditorGridMaxWidth)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        DisplayToHardwareOrder.chunked(4).forEach { row ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                row.forEach { led ->
-                                    val selected = (mask and (1 shl led)) != 0
-                                    Surface(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(40.dp)
-                                            .clickable { onToggleFlowFrameLed(frameIndex, led) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
-                                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text((DisplayToHardwareOrder.indexOf(led) + 1).toString(), fontWeight = FontWeight.SemiBold)
-                                        }
+            }
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = FlowEditorGridMaxWidth)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DisplayToHardwareOrder.chunked(4).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            row.forEach { led ->
+                                val selected = (mask and (1 shl led)) != 0
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(40.dp)
+                                        .clickable { onToggleFlowFrameLed(frameIndex, led) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+                                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text((DisplayToHardwareOrder.indexOf(led) + 1).toString(), fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
+            if (frameIndex < flowFrames.lastIndex) {
+                Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
             }
         }
     }
@@ -2276,8 +2286,8 @@ private fun FrameSection(
     onSendManual: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
-    AppCard(title = "帧与发送") {
-        Text("当前 ${state.frame.bytes.size} 字节帧", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    AppSection(title = "帧与发送") {
+        SectionSubheading("当前 ${state.frame.bytes.size} 字节帧")
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
@@ -2317,7 +2327,7 @@ private fun FrameSection(
         Spacer(modifier = Modifier.height(14.dp))
         ByteTable(frameHex = state.frame.spacedHex())
         Spacer(modifier = Modifier.height(14.dp))
-        Text("手动 Hex", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        SectionSubheading("手动 Hex")
         OutlinedTextField(
             value = state.manualHex,
             onValueChange = onManualHex,
@@ -2370,7 +2380,7 @@ private fun WorkbenchSection(
     onImport: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    AppCard(title = "工作台") {
+    AppSection(title = "工作台") {
         TabRow(selectedTabIndex = selectedTab) {
             WorkbenchTabs.forEachIndexed { index, title ->
                 Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) })
@@ -2451,38 +2461,39 @@ private fun PresetRow(
     preset: Preset,
     onLoad: () -> Unit,
     onRename: (String) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    showDivider: Boolean = false
 ) {
     var editing by remember { mutableStateOf(false) }
     var newName by remember(preset.id, preset.name) { mutableStateOf(preset.name) }
-    Surface(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+            .padding(vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (editing) {
-                OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true)
-            } else {
-                Text(preset.name, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "${preset.control.mode.title} ${preset.control.rgbHex} 亮度 ${preset.control.brightness}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onLoad) { Text("加载") }
-                OutlinedButton(onClick = {
-                    if (editing) {
-                        onRename(newName)
-                    }
-                    editing = !editing
-                }) { Text(if (editing) "保存名称" else "重命名") }
-                TextButton(onClick = onDelete) { Text("删除") }
-            }
+        if (editing) {
+            OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true)
+        } else {
+            Text(preset.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(
+                "${preset.control.mode.title} ${preset.control.rgbHex} 亮度 ${preset.control.brightness}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onLoad) { Text("加载") }
+            OutlinedButton(onClick = {
+                if (editing) {
+                    onRename(newName)
+                }
+                editing = !editing
+            }) { Text(if (editing) "保存名称" else "重命名") }
+            TextButton(onClick = onDelete) { Text("删除") }
+        }
+        if (showDivider) {
+            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
         }
     }
 }
@@ -2494,30 +2505,35 @@ private fun HistoryPanel(
     onClearHistory: () -> Unit
 ) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text("最近 ${history.size} 条", fontWeight = FontWeight.SemiBold)
+        Text(
+            "最近 ${history.size} 条",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold
+        )
         TextButton(onClick = onClearHistory, enabled = history.isNotEmpty()) { Text("清空") }
     }
     if (history.isEmpty()) {
         Text("暂无发送历史", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     val visibleHistory = remember(history) { history.take(MaxInlineHistory) }
-    visibleHistory.forEach { item ->
-        Surface(
+    visibleHistory.forEachIndexed { index, item ->
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                .padding(vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("${item.source} · ${formatTime(item.timestamp)}", fontWeight = FontWeight.SemiBold)
-                Text(item.summary, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                Text(item.hex, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                OutlinedButton(onClick = { onResendHistory(item) }) { Text("重发") }
+            Text("${item.source} · ${formatTime(item.timestamp)}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(item.summary, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            Text(item.hex, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { onResendHistory(item) }) { Text("重发") }
+            if (index < visibleHistory.lastIndex) {
+                Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
             }
         }
     }
     if (history.size > MaxInlineHistory) {
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
             "还有 ${history.size - MaxInlineHistory} 条历史未显示，导出 JSON 可查看完整列表",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2550,21 +2566,33 @@ private fun ImportExportPanel(
 }
 
 @Composable
-private fun AppCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(
+private fun AppSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+            .padding(horizontal = SectionHorizontalPadding)
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
-            content()
-        }
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+        Spacer(modifier = Modifier.height(16.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(0.dp), content = content)
     }
+}
+
+@Composable
+private fun SectionSubheading(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface
+    )
 }
 
 private fun bluetoothPermissions(): Array<String> =
