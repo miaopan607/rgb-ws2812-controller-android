@@ -1,6 +1,7 @@
 package com.rgbws2812.controller.protocol
 
 import com.rgbws2812.controller.model.ControlMode
+import com.rgbws2812.controller.model.GradientPattern
 import com.rgbws2812.controller.model.RgbControlState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -66,8 +67,46 @@ class RgbFrameBuilderTest {
         val compact = RgbFrameBuilder.parseHex("AA55030000004014010056")
 
         assertEquals(spaced.spacedHex(), compact.spacedHex())
-        assertEquals(ControlMode.Gradient, spaced.mode)
+        assertEquals(ControlMode.Disco, spaced.mode)
         assertEquals(listOf(0x00), spaced.flowFrames)
+    }
+
+    @Test
+    fun gradientModeUsesNewWireValue() {
+        val frame = RgbFrameBuilder.build(
+            RgbControlState.Default.copy(
+                mode = ControlMode.Gradient,
+                brightness = 64,
+                period = 20
+            )
+        )
+
+        assertEquals("AA 55 04 00 FF 00 40 14 01 00 AE", frame.spacedHex())
+    }
+
+    @Test
+    fun flowGradientModeUsesNewWireValue() {
+        val frame = RgbFrameBuilder.build(
+            RgbControlState.Default.copy(
+                mode = ControlMode.FlowGradient,
+                brightness = 64,
+                period = 20
+            )
+        )
+
+        assertEquals("AA 55 05 00 FF 00 40 14 01 00 AF", frame.spacedHex())
+    }
+
+    @Test
+    fun gradientPatternMatchesConfiguredColorLoop() {
+        assertEquals(255, GradientPattern.gradientColor(0).red)
+        assertEquals(0, GradientPattern.gradientColor(0).green)
+        assertEquals(255, GradientPattern.gradientColor(255).green)
+        assertEquals(255, GradientPattern.gradientColor(256).green)
+        assertEquals(0, GradientPattern.gradientColor(512).red)
+        assertEquals(255, GradientPattern.gradientColor(768).blue)
+        assertEquals(255, GradientPattern.gradientColor(1280).blue)
+        assertEquals(0, GradientPattern.gradientColor(1535).blue)
     }
 
     @Test

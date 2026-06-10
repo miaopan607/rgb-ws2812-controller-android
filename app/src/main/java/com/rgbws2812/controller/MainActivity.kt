@@ -118,9 +118,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rgbws2812.controller.model.BluetoothConnectionState
 import com.rgbws2812.controller.model.ControlMode
 import com.rgbws2812.controller.model.DeviceInfo
+import com.rgbws2812.controller.model.GradientPattern
 import com.rgbws2812.controller.model.Preset
 import com.rgbws2812.controller.model.RgbControlState
+import com.rgbws2812.controller.model.RgbColor
 import com.rgbws2812.controller.model.SendHistoryItem
+import com.rgbws2812.controller.model.isGradientFamily
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
 import com.rgbws2812.controller.protocol.toHexByte
 import com.rgbws2812.controller.ui.theme.RgbControllerTheme
@@ -160,6 +163,13 @@ private val BasicColors = listOf(
     PaletteColor("红", 255, 0, 0),
     PaletteColor("绿", 0, 255, 0),
     PaletteColor("蓝", 0, 0, 255)
+)
+private val PrimaryControlModes = listOf(
+    ControlMode.Static,
+    ControlMode.Flow,
+    ControlMode.Breath,
+    ControlMode.Disco,
+    ControlMode.Gradient
 )
 private val FlowOrderPresets = listOf(
     "正序" to listOf(3, 2, 1, 0, 4, 5, 6, 7),
@@ -892,7 +902,9 @@ private fun LedPreviewPanel(
     val animationDurationMillis = when (state.mode) {
         ControlMode.Breath -> (state.period.coerceIn(1, 255) * 100).coerceAtLeast(200)
         ControlMode.Flow -> cleanFrames.size * LedPreviewStepMillis
-        ControlMode.Gradient -> 8 * LedPreviewStepMillis
+        ControlMode.Disco -> 8 * LedPreviewStepMillis
+        ControlMode.Gradient,
+        ControlMode.FlowGradient -> (state.period.coerceIn(1, 255) * 50).coerceAtLeast(50)
         else -> LedPreviewStepMillis
     }
     var progress by remember { mutableStateOf(0f) }
@@ -907,7 +919,8 @@ private fun LedPreviewPanel(
     }
 
     val frameIndex = ((progress * cleanFrames.size).toInt()).coerceIn(0, cleanFrames.lastIndex)
-    val gradientPhase = ((progress * 8f).toInt()).coerceIn(0, 7)
+    val discoPhase = ((progress * 8f).toInt()).coerceIn(0, 7)
+    val gradientPhase = ((progress * GradientPattern.PhaseCount).toInt()).coerceIn(0, GradientPattern.PhaseCount - 1)
     val activeMask = when (state.mode) {
         ControlMode.Flow -> cleanFrames[frameIndex]
         else -> 0xFF
@@ -947,6 +960,7 @@ private fun LedPreviewPanel(
                 LedPreviewGrid(
                     activeMask = activeMask,
                     baseColor = baseColor,
+                    discoPhase = discoPhase,
                     gradientPhase = gradientPhase,
                     mode = state.mode,
                     brightnessFactor = brightnessFactor,
@@ -976,6 +990,7 @@ private fun LedPreviewPanel(
                 LedPreviewGrid(
                     activeMask = activeMask,
                     baseColor = baseColor,
+                    discoPhase = discoPhase,
                     gradientPhase = gradientPhase,
                     mode = state.mode,
                     brightnessFactor = brightnessFactor,
@@ -994,6 +1009,7 @@ private fun LedPreviewPanel(
 private fun LedPreviewGrid(
     activeMask: Int,
     baseColor: Color,
+    discoPhase: Int,
     gradientPhase: Int,
     mode: ControlMode,
     brightnessFactor: Float,
@@ -1022,11 +1038,7 @@ private fun LedPreviewGrid(
                 y = startY + row * (diameter + rowGap)
             )
             val selected = (activeMask and (1 shl led)) != 0
-            val ledColor = if (mode == ControlMode.Gradient) {
-                gradientPreviewColor(gradientPhase + led)
-            } else {
-                baseColor
-            }
+            val ledColor = previewLedColor(mode = mode, baseColor = baseColor, led = led, discoPhase = discoPhase, gradientPhase = gradientPhase)
             if (selected) {
                 drawCircle(
                     color = ledColor.copy(alpha = (0.14f + 0.32f * displayBrightness).coerceIn(0f, 0.6f)),
@@ -1055,17 +1067,21 @@ private fun LedPreviewGrid(
     }
 }
 
-private fun gradientPreviewColor(phase: Int): Color =
-    when (phase.floorMod(8)) {
-        0, 3, 6 -> Color(0xFF00FF00)
-        1, 4, 7 -> Color(0xFFFF0000)
-        else -> Color(0xFF0000FF)
+private fun previewLedColor(
+    mode: ControlMode,
+    baseColor: Color,
+    led: Int,
+    discoPhase: Int,
+    gradientPhase: Int
+): Color =
+    when (mode) {
+        ControlMode.Disco -> gradientPreviewColor(GradientPattern.discoColor(discoPhase + led))
+        ControlMode.Gradient -> gradientPreviewColor(GradientPattern.gradientColor(gradientPhase))
+        ControlMode.FlowGradient -> gradientPreviewColor(GradientPattern.flowGradientColor(gradientPhase, led))
+        else -> baseColor
     }
 
-private fun Int.floorMod(divisor: Int): Int {
-    val result = this % divisor
-    return if (result < 0) result + divisor else result
-}
+private fun gradientPreviewColor(color: RgbColor): Color = Color(color.red, color.green, color.blue)
 
 @Composable
 private fun BluetoothStatusPanel(
@@ -1235,16 +1251,41 @@ private fun ControlSection(
     AppCard(title = "控制参数") {
         Text("模式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ControlMode.entries.forEach { mode ->
+            PrimaryControlModes.forEach { mode ->
                 FilterChip(
-                    selected = state.mode == mode,
-                    onClick = { onMode(mode) },
+                    selected = selectedPrimaryMode(state.mode) == mode,
+                    onClick = {
+                        onMode(
+                            if (mode == ControlMode.Gradient) {
+                                if (state.mode.isGradientFamily) state.mode else ControlMode.Gradient
+                            } else {
+                                mode
+                            }
+                        )
+                    },
                     label = { Text(mode.title) }
                 )
             }
         }
         Spacer(modifier = Modifier.height(14.dp))
-        if (state.mode != ControlMode.Gradient) {
+        if (state.mode.isGradientFamily) {
+            Text("渐变细分", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    ControlMode.Gradient to "普通渐变",
+                    ControlMode.FlowGradient to "流动渐变"
+                ).forEach { (mode, label) ->
+                    FilterChip(
+                        selected = state.mode == mode,
+                        onClick = { onMode(mode) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+        if (state.mode != ControlMode.Disco && !state.mode.isGradientFamily) {
             ColorControls(state = state, onColor = onColor)
             Spacer(modifier = Modifier.height(12.dp))
         }
@@ -1257,6 +1298,14 @@ private fun ControlSection(
         if (state.mode == ControlMode.Breath) {
             NumberSlider(
                 label = "呼吸周期 x100ms",
+                value = state.period,
+                range = 1..255,
+                onValue = onPeriod
+            )
+        }
+        if (state.mode.isGradientFamily) {
+            NumberSlider(
+                label = "渐变周期 x50ms",
                 value = state.period,
                 range = 1..255,
                 onValue = onPeriod
@@ -1286,6 +1335,9 @@ private fun ControlSection(
         }
     }
 }
+
+private fun selectedPrimaryMode(mode: ControlMode): ControlMode =
+    if (mode.isGradientFamily) ControlMode.Gradient else mode
 
 @Composable
 private fun ColorControls(
