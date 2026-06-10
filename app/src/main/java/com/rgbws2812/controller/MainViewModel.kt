@@ -33,6 +33,7 @@ data class MainUiState(
     val orderValid: Boolean = true,
     val flowFramesValid: Boolean = true,
     val autoSendEnabled: Boolean = false,
+    val showAdvancedSendPanel: Boolean = false,
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList(),
     val bluetooth: BluetoothUiState = BluetoothUiState(),
@@ -59,6 +60,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 orderValid = orderValid,
                 flowFramesValid = flowFramesValid,
                 autoSendEnabled = storageState.autoSendEnabled,
+                showAdvancedSendPanel = storageState.showAdvancedSendPanel,
                 presets = storageState.presets,
                 history = storageState.history,
                 bluetooth = bluetoothState,
@@ -209,6 +211,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             storage.saveAutoSend(enabled)
             manualState.update { it.copy(statusMessage = if (enabled) "自动发送已开启" else "自动发送已关闭") }
             if (enabled) scheduleAutoSend()
+        }
+    }
+
+    fun setShowAdvancedSendPanel(enabled: Boolean) {
+        viewModelScope.launch {
+            storage.saveShowAdvancedSendPanel(enabled)
+            manualState.update { it.copy(statusMessage = if (enabled) "高级发送面板已显示" else "高级发送面板已隐藏") }
         }
     }
 

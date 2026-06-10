@@ -1,11 +1,18 @@
 package com.rgbws2812.controller.data
 
 import com.rgbws2812.controller.model.ControlMode
+import com.rgbws2812.controller.model.AppStorageState
 import com.rgbws2812.controller.model.RgbControlState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class AppStorageTest {
+    @Test
+    fun appStorageStateDefaultsToHiddenAdvancedSendPanel() {
+        assertFalse(com.rgbws2812.controller.model.AppStorageState().showAdvancedSendPanel)
+    }
+
     @Test
     fun restoreControlStatePrefersVersion2TimingFields() {
         val decoded = AppStorage.restoreControlState(
@@ -87,5 +94,26 @@ class AppStorageTest {
         )
 
         assertEquals(listOf(3, 12, 48, 192), decoded.flowFrames)
+    }
+
+    @Test
+    fun decodeControlFallsBackToHiddenAdvancedSendPanelWhenFieldIsAbsent() {
+        val state = AppStorageState(
+            control = AppStorage.decodeControl(
+                """
+                {
+                  "mode": 1,
+                  "red": 0,
+                  "green": 255,
+                  "blue": 0,
+                  "brightness": 17,
+                  "flowInterval": 25,
+                  "order": [3, 2, 1, 0, 4, 5, 6, 7]
+                }
+                """.trimIndent()
+            )
+        )
+
+        assertFalse(state.showAdvancedSendPanel)
     }
 }

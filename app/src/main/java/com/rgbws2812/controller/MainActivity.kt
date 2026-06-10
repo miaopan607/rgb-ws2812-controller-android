@@ -57,9 +57,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -74,13 +77,14 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -300,9 +304,15 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                 if (page == AppPage.Controller) {
                     ControllerTopBar(
                         connectionState = uiState.bluetooth.connectionState,
+                        flowFramesValid = uiState.flowFramesValid,
+                        autoSendEnabled = uiState.autoSendEnabled,
+                        showAdvancedSendPanel = uiState.showAdvancedSendPanel,
                         previewVisible = previewVisible,
+                        onSendClick = { viewModel.sendCurrent() },
                         onPreviewClick = { previewVisible = true },
                         onBluetoothClick = { currentPage = AppPage.Bluetooth },
+                        onToggleAutoSend = { viewModel.setAutoSend(it) },
+                        onToggleAdvancedSendPanel = { viewModel.setShowAdvancedSendPanel(it) },
                         onResetAllParameters = { viewModel.resetControlParameters() }
                     )
                 } else {
@@ -399,7 +409,6 @@ private fun ControllerContent(
         onDeleteFlowFrame = { viewModel.deleteFlowFrame(it) },
         onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
         onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
-        onAutoSend = { viewModel.setAutoSend(it) },
         onSend = { viewModel.sendCurrent() },
         onManualHex = { viewModel.updateManualHex(it) },
         onLoadCurrentFrame = { viewModel.loadCurrentFrameToManualHex() },
@@ -488,7 +497,6 @@ private fun ControllerPage(
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
-    onAutoSend: (Boolean) -> Unit,
     onSend: () -> Unit,
     onManualHex: (String) -> Unit,
     onLoadCurrentFrame: () -> Unit,
@@ -537,7 +545,6 @@ private fun ControllerPage(
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
-                    onAutoSend = onAutoSend,
                     onSend = onSend,
                     onManualHex = onManualHex,
                     onLoadCurrentFrame = onLoadCurrentFrame,
@@ -571,7 +578,6 @@ private fun ControllerPage(
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
-                    onAutoSend = onAutoSend,
                     onSend = onSend,
                     onManualHex = onManualHex,
                     onLoadCurrentFrame = onLoadCurrentFrame,
@@ -613,7 +619,6 @@ private fun ControllerPage(
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown,
-                onAutoSend = onAutoSend,
                 onSend = onSend,
                 onManualHex = onManualHex,
                 onLoadCurrentFrame = onLoadCurrentFrame,
@@ -649,7 +654,6 @@ private fun ControllerPageList(
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
-    onAutoSend: (Boolean) -> Unit,
     onSend: () -> Unit,
     onManualHex: (String) -> Unit,
     onLoadCurrentFrame: () -> Unit,
@@ -674,7 +678,6 @@ private fun ControllerPageList(
         item {
             ControlSection(
                 state = state.control,
-                autoSendEnabled = state.autoSendEnabled,
                 onMode = onMode,
                 onColor = onColor,
                 onBrightness = onBrightness,
@@ -687,18 +690,19 @@ private fun ControllerPageList(
                 onAddFlowFrame = onAddFlowFrame,
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
-                onMoveFlowFrameDown = onMoveFlowFrameDown,
-                onAutoSend = onAutoSend
+                onMoveFlowFrameDown = onMoveFlowFrameDown
             )
         }
-        item {
-            FrameSection(
-                state = state,
-                onSend = onSend,
-                onManualHex = onManualHex,
-                onLoadCurrentFrame = onLoadCurrentFrame,
-                onSendManual = onSendManual
-            )
+        if (state.showAdvancedSendPanel) {
+            item {
+                FrameSection(
+                    state = state,
+                    onSend = onSend,
+                    onManualHex = onManualHex,
+                    onLoadCurrentFrame = onLoadCurrentFrame,
+                    onSendManual = onSendManual
+                )
+            }
         }
         item {
             WorkbenchSection(
@@ -796,13 +800,20 @@ private fun BluetoothConnectionPage(
 @Composable
 private fun ControllerTopBar(
     connectionState: BluetoothConnectionState,
+    flowFramesValid: Boolean,
+    autoSendEnabled: Boolean,
+    showAdvancedSendPanel: Boolean,
     previewVisible: Boolean,
+    onSendClick: () -> Unit,
     onPreviewClick: () -> Unit,
     onBluetoothClick: () -> Unit,
+    onToggleAutoSend: (Boolean) -> Unit,
+    onToggleAdvancedSendPanel: (Boolean) -> Unit,
     onResetAllParameters: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
+    val sendEnabled = flowFramesValid && connectionState == BluetoothConnectionState.Connected
 
     if (showResetConfirm) {
         AlertDialog(
@@ -830,6 +841,16 @@ private fun ControllerTopBar(
     TopAppBar(
         title = { Text("RGB 彩灯控制") },
         actions = {
+            IconButton(onClick = onSendClick, enabled = sendEnabled) {
+                SendPlaneIcon(
+                    modifier = Modifier.size(21.dp),
+                    color = if (sendEnabled) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.outline
+                    }
+                )
+            }
             IconButton(onClick = onPreviewClick, enabled = !previewVisible) {
                 PlayPreviewIcon(
                     modifier = Modifier.size(22.dp),
@@ -867,19 +888,110 @@ private fun ControllerTopBar(
                 }
                 DropdownMenu(
                     expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
+                    onDismissRequest = { menuExpanded = false },
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp),
+                    tonalElevation = 6.dp,
+                    shadowElevation = 8.dp
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("还原全部参数") },
-                        onClick = {
+                    ControllerMenuContent(
+                        autoSendEnabled = autoSendEnabled,
+                        showAdvancedSendPanel = showAdvancedSendPanel,
+                        onToggleAutoSend = {
+                            onToggleAutoSend(!autoSendEnabled)
+                            menuExpanded = false
+                        },
+                        onToggleAdvancedSendPanel = {
+                            onToggleAdvancedSendPanel(!showAdvancedSendPanel)
+                            menuExpanded = false
+                        },
+                        onResetAllParameters = {
                             menuExpanded = false
                             showResetConfirm = true
                         }
                     )
-                }
+                } 
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+    )
+}
+
+@Composable
+private fun ControllerMenuContent(
+    autoSendEnabled: Boolean,
+    showAdvancedSendPanel: Boolean,
+    onToggleAutoSend: () -> Unit,
+    onToggleAdvancedSendPanel: () -> Unit,
+    onResetAllParameters: () -> Unit
+) {
+    CheckableMenuItem(
+        text = "自动发送",
+        checked = autoSendEnabled,
+        supportingText = "参数变化后短延迟发送",
+        onClick = onToggleAutoSend
+    )
+    CheckableMenuItem(
+        text = "显示高级发送面板",
+        checked = showAdvancedSendPanel,
+        supportingText = "显示当前帧、复制和手动 Hex",
+        onClick = onToggleAdvancedSendPanel
+    )
+    Divider(
+        modifier = Modifier.padding(vertical = 4.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+    )
+    DropdownMenuItem(
+        text = { Text("还原全部参数") },
+        colors = MenuDefaults.itemColors(
+            textColor = MaterialTheme.colorScheme.onSurface,
+            leadingIconColor = MaterialTheme.colorScheme.error,
+            trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            disabledLeadingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        ),
+        onClick = onResetAllParameters
+    )
+}
+
+@Composable
+private fun CheckableMenuItem(
+    text: String,
+    checked: Boolean,
+    supportingText: String,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(text, fontWeight = FontWeight.Medium)
+                Text(
+                    supportingText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        },
+        trailingIcon = {
+            Checkbox(
+                checked = checked,
+                onCheckedChange = null
+            )
+        },
+        colors = MenuDefaults.itemColors(
+            textColor = MaterialTheme.colorScheme.onSurface,
+            trailingIconColor = MaterialTheme.colorScheme.primary,
+            disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            disabledLeadingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        ),
+        contentPadding = MenuDefaults.DropdownMenuItemContentPadding,
+        onClick = onClick
     )
 }
 
@@ -1250,7 +1362,6 @@ private fun DeviceList(
 @Composable
 private fun ControlSection(
     state: RgbControlState,
-    autoSendEnabled: Boolean,
     onMode: (ControlMode) -> Unit,
     onColor: (Int, Int, Int) -> Unit,
     onBrightness: (Int) -> Unit,
@@ -1263,8 +1374,7 @@ private fun ControlSection(
     onAddFlowFrame: () -> Unit,
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
-    onMoveFlowFrameDown: (Int) -> Unit,
-    onAutoSend: (Boolean) -> Unit
+    onMoveFlowFrameDown: (Int) -> Unit
 ) {
     AppSection(title = "控制参数") {
         SectionSubheading("模式")
@@ -1354,14 +1464,6 @@ private fun ControlSection(
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown
             )
-        }
-        Divider(modifier = Modifier.padding(vertical = 12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Switch(checked = autoSendEnabled, onCheckedChange = onAutoSend)
-            Column {
-                Text("自动发送", fontWeight = FontWeight.SemiBold)
-                Text("默认关闭，开启后参数变化会短延迟发送", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
     }
 }
@@ -1601,6 +1703,16 @@ private fun PlayPreviewIcon(modifier: Modifier = Modifier, color: Color) {
         }
         drawPath(path = path, color = color)
     }
+}
+
+@Composable
+private fun SendPlaneIcon(modifier: Modifier = Modifier, color: Color) {
+    Icon(
+        imageVector = Icons.Rounded.Send,
+        contentDescription = "发送当前帧",
+        modifier = modifier,
+        tint = color
+    )
 }
 
 @Composable
