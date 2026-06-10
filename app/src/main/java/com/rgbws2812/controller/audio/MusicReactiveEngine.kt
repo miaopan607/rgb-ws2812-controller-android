@@ -18,13 +18,19 @@ data class StereoLevel(
 
 data class MusicReactiveSettings(
     val maxBrightness: Int = 64,
-    val targetFps: Int = 20
+    val targetFps: Int = 20,
+    val audioSource: MusicReactiveAudioSource = MusicReactiveAudioSource.Microphone
 ) {
     fun clamped(): MusicReactiveSettings =
         copy(
             maxBrightness = maxBrightness.coerceIn(0, 255),
             targetFps = targetFps.coerceIn(1, 25)
         )
+}
+
+enum class MusicReactiveAudioSource(val title: String) {
+    Microphone("麦克风"),
+    SystemPlayback("系统音频")
 }
 
 data class MusicReactiveRuntimeState(

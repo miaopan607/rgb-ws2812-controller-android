@@ -7,6 +7,7 @@
 package com.rgbws2812.controller
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
@@ -127,6 +128,8 @@ import com.rgbws2812.controller.model.Preset
 import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.RgbColor
 import com.rgbws2812.controller.model.SendHistoryItem
+import com.rgbws2812.controller.audio.MediaProjectionPermission
+import com.rgbws2812.controller.audio.MusicReactiveAudioSource
 import com.rgbws2812.controller.model.isGradientFamily
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
 import com.rgbws2812.controller.protocol.toHexByte
@@ -274,12 +277,30 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
         microphonePermissionGranted = granted || viewModel.hasMicrophonePermission()
         if (granted) viewModel.clearMessages()
     }
-    val handleSendClick = {
-        if (uiState.control.mode == ControlMode.MusicReactive &&
-            !uiState.musicRuntime.isRunning &&
-            !viewModel.hasMicrophonePermission()
-        ) {
+    val systemAudioCaptureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            viewModel.startMusicReactive(MediaProjectionPermission(result.resultCode, data))
+        }
+    }
+    val requestSystemAudioCapture = {
+        if (!viewModel.hasMicrophonePermission()) {
             microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            systemAudioCaptureLauncher.launch(viewModel.createSystemAudioCaptureIntent())
+        } else {
+            viewModel.startMusicReactive()
+        }
+    }
+    val handleSendClick = {
+        if (uiState.control.mode == ControlMode.MusicReactive && !uiState.musicRuntime.isRunning) {
+            when {
+                !viewModel.hasMicrophonePermission() -> microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                uiState.musicSettings.audioSource == MusicReactiveAudioSource.SystemPlayback -> requestSystemAudioCapture()
+                else -> viewModel.sendCurrent()
+            }
         } else {
             viewModel.sendCurrent()
         }
@@ -363,7 +384,8 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                     onClosePreview = { previewVisible = false },
                     onRequestMicrophonePermission = {
                         microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
+                    },
+                    onRequestSystemAudioCapture = requestSystemAudioCapture
                 )
                 BluetoothContent(
                     modifier = Modifier
@@ -396,7 +418,8 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                         onClosePreview = { previewVisible = false },
                         onRequestMicrophonePermission = {
                             microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        }
+                        },
+                        onRequestSystemAudioCapture = requestSystemAudioCapture
                     )
 
                     AppPage.Bluetooth -> BluetoothContent(
@@ -422,7 +445,8 @@ private fun ControllerContent(
     previewVisible: Boolean,
     microphonePermissionGranted: Boolean,
     onClosePreview: () -> Unit,
-    onRequestMicrophonePermission: () -> Unit
+    onRequestMicrophonePermission: () -> Unit,
+    onRequestSystemAudioCapture: () -> Unit
 ) {
     ControllerPage(
         modifier = modifier,
@@ -445,8 +469,10 @@ private fun ControllerContent(
         onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
         onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
         onMusicMaxBrightness = { viewModel.setMusicMaxBrightness(it) },
+        onMusicAudioSource = { viewModel.setMusicAudioSource(it) },
         microphonePermissionGranted = microphonePermissionGranted,
         onRequestMicrophonePermission = onRequestMicrophonePermission,
+        onRequestSystemAudioCapture = onRequestSystemAudioCapture,
         onSend = { viewModel.sendCurrent() },
         onManualHex = { viewModel.updateManualHex(it) },
         onLoadCurrentFrame = { viewModel.loadCurrentFrameToManualHex() },
@@ -538,8 +564,10 @@ private fun ControllerPage(
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
     onMusicMaxBrightness: (Int) -> Unit,
+    onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     microphonePermissionGranted: Boolean,
     onRequestMicrophonePermission: () -> Unit,
+    onRequestSystemAudioCapture: () -> Unit,
     onSend: () -> Unit,
     onManualHex: (String) -> Unit,
     onLoadCurrentFrame: () -> Unit,
@@ -591,8 +619,10 @@ private fun ControllerPage(
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
                     onMusicMaxBrightness = onMusicMaxBrightness,
+                    onMusicAudioSource = onMusicAudioSource,
                     microphonePermissionGranted = microphonePermissionGranted,
                     onRequestMicrophonePermission = onRequestMicrophonePermission,
+                    onRequestSystemAudioCapture = onRequestSystemAudioCapture,
                     onSend = onSend,
                     onManualHex = onManualHex,
                     onLoadCurrentFrame = onLoadCurrentFrame,
@@ -629,8 +659,10 @@ private fun ControllerPage(
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
                     onMusicMaxBrightness = onMusicMaxBrightness,
+                    onMusicAudioSource = onMusicAudioSource,
                     microphonePermissionGranted = microphonePermissionGranted,
                     onRequestMicrophonePermission = onRequestMicrophonePermission,
+                    onRequestSystemAudioCapture = onRequestSystemAudioCapture,
                     onSend = onSend,
                     onManualHex = onManualHex,
                     onLoadCurrentFrame = onLoadCurrentFrame,
@@ -675,8 +707,10 @@ private fun ControllerPage(
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown,
                 onMusicMaxBrightness = onMusicMaxBrightness,
+                onMusicAudioSource = onMusicAudioSource,
                 microphonePermissionGranted = microphonePermissionGranted,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
+                onRequestSystemAudioCapture = onRequestSystemAudioCapture,
                 onSend = onSend,
                 onManualHex = onManualHex,
                 onLoadCurrentFrame = onLoadCurrentFrame,
@@ -715,8 +749,10 @@ private fun ControllerPageList(
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
     onMusicMaxBrightness: (Int) -> Unit,
+    onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     microphonePermissionGranted: Boolean,
     onRequestMicrophonePermission: () -> Unit,
+    onRequestSystemAudioCapture: () -> Unit,
     onSend: () -> Unit,
     onManualHex: (String) -> Unit,
     onLoadCurrentFrame: () -> Unit,
@@ -761,6 +797,8 @@ private fun ControllerPageList(
                 microphonePermissionGranted = microphonePermissionGranted,
                 onMusicMaxBrightness = onMusicMaxBrightness,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
+                onMusicAudioSource = onMusicAudioSource,
+                onRequestSystemAudioCapture = onRequestSystemAudioCapture,
             )
         }
         if (state.showAdvancedSendPanel) {
@@ -1474,7 +1512,9 @@ private fun ControlSection(
     musicRuntime: com.rgbws2812.controller.audio.MusicReactiveRuntimeState,
     microphonePermissionGranted: Boolean,
     onMusicMaxBrightness: (Int) -> Unit,
-    onRequestMicrophonePermission: () -> Unit
+    onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
+    onRequestMicrophonePermission: () -> Unit,
+    onRequestSystemAudioCapture: () -> Unit
 ) {
     AppSection(title = "控制参数") {
         SectionSubheading("模式")
@@ -1519,7 +1559,9 @@ private fun ControlSection(
                 runtime = musicRuntime,
                 microphonePermissionGranted = microphonePermissionGranted,
                 onMaxBrightness = onMusicMaxBrightness,
-                onRequestMicrophonePermission = onRequestMicrophonePermission
+                onAudioSource = onMusicAudioSource,
+                onRequestMicrophonePermission = onRequestMicrophonePermission,
+                onRequestSystemAudioCapture = onRequestSystemAudioCapture
             )
             return@AppSection
         }
@@ -1589,12 +1631,37 @@ private fun MusicReactiveControls(
     runtime: com.rgbws2812.controller.audio.MusicReactiveRuntimeState,
     microphonePermissionGranted: Boolean,
     onMaxBrightness: (Int) -> Unit,
-    onRequestMicrophonePermission: () -> Unit
+    onAudioSource: (MusicReactiveAudioSource) -> Unit,
+    onRequestMicrophonePermission: () -> Unit,
+    onRequestSystemAudioCapture: () -> Unit
 ) {
     SectionSubheading("音频源")
     Spacer(modifier = Modifier.height(8.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MusicReactiveAudioSource.entries.forEach { source ->
+            val enabled = source != MusicReactiveAudioSource.SystemPlayback || Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+            FilterChip(
+                selected = settings.audioSource == source,
+                enabled = enabled && !runtime.isRunning,
+                onClick = { onAudioSource(source) },
+                label = { Text(source.title) }
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
     Text(
-        text = if (microphonePermissionGranted) "麦克风可用" else "麦克风需要录音权限",
+        text = when (settings.audioSource) {
+            MusicReactiveAudioSource.Microphone ->
+                if (microphonePermissionGranted) "麦克风可用" else "麦克风需要录音权限"
+            MusicReactiveAudioSource.SystemPlayback ->
+                if (!microphonePermissionGranted) {
+                    "系统音频采集需要录音权限和系统音频授权"
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    "启动时会请求系统音频采集授权"
+                } else {
+                    "系统音频采集需要 Android 10 或更高版本"
+                }
+        },
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -1603,6 +1670,18 @@ private fun MusicReactiveControls(
         OutlinedButton(onClick = onRequestMicrophonePermission) {
             Text("授权录音权限")
         }
+    }
+    if (settings.audioSource == MusicReactiveAudioSource.SystemPlayback && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onRequestSystemAudioCapture, enabled = !runtime.isRunning) {
+            Text("授权并开始采集")
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "只能捕获允许被录制的媒体或游戏音频，通话、受保护内容或禁止捕获的 App 不会产生电平。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
     Spacer(modifier = Modifier.height(12.dp))
     NumberSlider(

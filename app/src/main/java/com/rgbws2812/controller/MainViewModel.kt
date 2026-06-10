@@ -1,10 +1,15 @@
 package com.rgbws2812.controller
 
 import android.app.Application
+import android.content.Context
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rgbws2812.controller.audio.AudioLevelCapture
+import com.rgbws2812.controller.audio.MediaProjectionPermission
 import com.rgbws2812.controller.audio.MusicReactiveMapper
+import com.rgbws2812.controller.audio.MusicReactiveAudioSource
 import com.rgbws2812.controller.audio.MusicReactiveRuntimeState
 import com.rgbws2812.controller.audio.MusicReactiveSettings
 import com.rgbws2812.controller.bluetooth.BluetoothSppClient
@@ -283,13 +288,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         musicState.update { it.copy(settings = it.settings.copy(maxBrightness = value).clamped()) }
     }
 
+    fun setMusicAudioSource(source: MusicReactiveAudioSource) {
+        val wasRunning = musicState.value.isRunning
+        if (wasRunning) stopMusicReactive()
+        musicState.update { it.copy(settings = it.settings.copy(audioSource = source).clamped()) }
+    }
+
     fun hasMicrophonePermission(): Boolean = audioCapture.hasMicrophonePermission()
 
-    fun startMusicReactive() {
+    fun createSystemAudioCaptureIntent() =
+        (getApplication<Application>().getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager)
+            .createScreenCaptureIntent()
+
+    fun startMusicReactive(mediaProjectionPermission: MediaProjectionPermission? = null) {
         val state = uiState.value
+        val source = state.musicSettings.audioSource
         if (!hasMicrophonePermission()) {
             manualState.update { it.copy(errorMessage = "需要录音权限后才能启动音乐律动") }
             return
+        }
+        if (source == MusicReactiveAudioSource.SystemPlayback) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                manualState.update { it.copy(errorMessage = "系统音频采集需要 Android 10 或更高版本") }
+                return
+            }
+            if (mediaProjectionPermission == null) {
+                manualState.update { it.copy(errorMessage = "需要授权系统音频采集后才能启动音乐律动") }
+                return
+            }
         }
         viewModelScope.launch {
             storage.saveControl(state.control.copy(mode = ControlMode.MusicReactive).clamped())
@@ -303,14 +329,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 sentThisSecond = 0,
                 fpsWindowStartedAt = System.currentTimeMillis(),
                 status = if (state.bluetooth.connectionState == BluetoothConnectionState.Connected) {
-                    "音乐律动运行中"
+                    "${source.title}律动运行中"
                 } else {
-                    "音乐律动预览中，未连接蓝牙"
+                    "${source.title}律动预览中，未连接蓝牙"
                 }
             )
         }
-        audioCapture.start()
-        startRealtimeSender()
+        viewModelScope.launch {
+            val started = audioCapture.start(source, mediaProjectionPermission)
+            if (started) {
+                startRealtimeSender()
+            } else {
+                realtimeSendJob?.cancel()
+                realtimeSendJob = null
+                realtimeSendInFlight = false
+                musicState.update {
+                    it.copy(
+                        isRunning = false,
+                        sentFps = 0,
+                        sentThisSecond = 0,
+                        status = "音乐律动启动失败"
+                    )
+                }
+            }
+        }
     }
 
     fun stopMusicReactive() {
@@ -527,13 +569,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         musicState.update { current ->
             val now = System.currentTimeMillis()
             val elapsed = now - current.fpsWindowStartedAt
+            val source = current.settings.audioSource
             if (elapsed >= 1_000L) {
                 val fps = current.sentThisSecond + 1
                 current.copy(
                     sentFps = fps,
                     sentThisSecond = 1,
                     fpsWindowStartedAt = now,
-                    status = "音乐律动预览中，未连接蓝牙"
+                    status = "${source.title}律动预览中，未连接蓝牙"
                 )
             } else {
                 current.copy(sentThisSecond = current.sentThisSecond + 1)
@@ -547,13 +590,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             musicState.update { current ->
                 val now = System.currentTimeMillis()
                 val elapsed = now - current.fpsWindowStartedAt
+                val source = current.settings.audioSource
                 if (elapsed >= 1_000L) {
                     val sentFps = current.sentThisSecond + 1
                     current.copy(
                         sentFps = sentFps,
                         sentThisSecond = 1,
                         fpsWindowStartedAt = now,
-                        status = "音乐律动运行中：$sentFps FPS"
+                        status = "${source.title}律动运行中：$sentFps FPS"
                     )
                 } else {
                     current.copy(sentThisSecond = current.sentThisSecond + 1)
