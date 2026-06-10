@@ -1300,6 +1300,7 @@ private fun ControlSection(
                 label = "呼吸周期 x100ms",
                 value = state.period,
                 range = 1..255,
+                valueHint = durationSecondsText(state.period.coerceIn(1, 255) * 100),
                 onValue = onPeriod
             )
         }
@@ -1308,6 +1309,7 @@ private fun ControlSection(
                 label = "渐变周期 x50ms",
                 value = state.period,
                 range = 1..255,
+                valueHint = durationSecondsText(state.period.coerceIn(1, 255) * 50),
                 onValue = onPeriod
             )
         }
@@ -1338,6 +1340,16 @@ private fun ControlSection(
 
 private fun selectedPrimaryMode(mode: ControlMode): ControlMode =
     if (mode.isGradientFamily) ControlMode.Gradient else mode
+
+private fun durationSecondsText(durationMillis: Int): String {
+    val seconds = durationMillis / 1000f
+    val roundedToInt = seconds.toInt()
+    return if (seconds == roundedToInt.toFloat()) {
+        "$roundedToInt 秒"
+    } else {
+        "${(seconds * 10).roundToInt() / 10f} 秒"
+    }
+}
 
 @Composable
 private fun ColorControls(
@@ -1938,7 +1950,7 @@ private fun InlineNumberSlider(
     label: String,
     value: Int,
     range: IntRange,
-    labelWidth: androidx.compose.ui.unit.Dp = 96.dp,
+    labelWidth: androidx.compose.ui.unit.Dp = 112.dp,
     onValue: (Int) -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1946,8 +1958,9 @@ private fun InlineNumberSlider(
             label,
             modifier = Modifier.width(labelWidth),
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            maxLines = 2,
+            overflow = TextOverflow.Clip,
+            lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
         )
         Slider(
             value = value.toFloat(),
@@ -2010,9 +2023,19 @@ private fun NumberSlider(
     label: String,
     value: Int,
     range: IntRange,
+    valueHint: String? = null,
     onValue: (Int) -> Unit
 ) {
-    InlineNumberSlider(label = label, value = value, range = range, onValue = onValue)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        valueHint?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        InlineNumberSlider(label = label, value = value, range = range, onValue = onValue)
+    }
 }
 
 @Composable
