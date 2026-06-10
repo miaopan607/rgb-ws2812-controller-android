@@ -140,7 +140,7 @@ private const val MaxInlinePresets = 8
 private const val MaxInlineHistory = 12
 private const val PageTransitionMillis = 220
 private const val PredictiveBackTravelFraction = 0.32f
-private const val LedPreviewStepMillis = 250
+private const val LedPreviewDiscoStepMillis = 250
 private const val LedPreviewGamma = 0.3f
 private val FlowEditorGridMaxWidth = 480.dp
 private val LedPreviewPanelMaxWidth = 220.dp
@@ -388,7 +388,7 @@ private fun ControllerContent(
         onMode = { viewModel.updateMode(it) },
         onColor = { r, g, b -> viewModel.updateColor(r, g, b) },
         onBrightness = { viewModel.updateBrightness(it) },
-        onPeriod = { viewModel.updatePeriod(it) },
+        onActivePeriod = { viewModel.updateActivePeriod(it) },
         onToggleLed = { viewModel.toggleOrderLed(it) },
         onOrder = { viewModel.setOrder(it) },
         onToggleFlowFrameLed = { frameIndex, led -> viewModel.toggleFlowFrameLed(frameIndex, led) },
@@ -476,7 +476,7 @@ private fun ControllerPage(
     onMode: (ControlMode) -> Unit,
     onColor: (Int, Int, Int) -> Unit,
     onBrightness: (Int) -> Unit,
-    onPeriod: (Int) -> Unit,
+    onActivePeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
@@ -524,7 +524,7 @@ private fun ControllerPage(
                     onMode = onMode,
                     onColor = onColor,
                     onBrightness = onBrightness,
-                    onPeriod = onPeriod,
+                    onActivePeriod = onActivePeriod,
                     onToggleLed = onToggleLed,
                     onOrder = onOrder,
                     onToggleFlowFrameLed = onToggleFlowFrameLed,
@@ -557,7 +557,7 @@ private fun ControllerPage(
                     onMode = onMode,
                     onColor = onColor,
                     onBrightness = onBrightness,
-                    onPeriod = onPeriod,
+                    onActivePeriod = onActivePeriod,
                     onToggleLed = onToggleLed,
                     onOrder = onOrder,
                     onToggleFlowFrameLed = onToggleFlowFrameLed,
@@ -598,7 +598,7 @@ private fun ControllerPage(
                 onMode = onMode,
                 onColor = onColor,
                 onBrightness = onBrightness,
-                onPeriod = onPeriod,
+                onActivePeriod = onActivePeriod,
                 onToggleLed = onToggleLed,
                 onOrder = onOrder,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
@@ -633,7 +633,7 @@ private fun ControllerPageList(
     onMode: (ControlMode) -> Unit,
     onColor: (Int, Int, Int) -> Unit,
     onBrightness: (Int) -> Unit,
-    onPeriod: (Int) -> Unit,
+    onActivePeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
@@ -671,7 +671,7 @@ private fun ControllerPageList(
                 onMode = onMode,
                 onColor = onColor,
                 onBrightness = onBrightness,
-                onPeriod = onPeriod,
+                onActivePeriod = onActivePeriod,
                 onToggleLed = onToggleLed,
                 onOrder = onOrder,
                 onToggleFlowFrameLed = onToggleFlowFrameLed,
@@ -800,7 +800,7 @@ private fun ControllerTopBar(
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
             title = { Text("还原全部参数") },
-            text = { Text("确认后会将模式、颜色、亮度、周期、流水顺序和高级画面还原为默认值。") },
+            text = { Text("确认后会将模式、颜色、亮度、流水间隔、呼吸周期、渐变周期、流水顺序和高级画面还原为默认值。") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -900,16 +900,16 @@ private fun LedPreviewPanel(
 ) {
     val cleanFrames = RgbControlState.sanitizeFlowFrames(state.flowFrames)
     val animationDurationMillis = when (state.mode) {
-        ControlMode.Breath -> (state.period.coerceIn(1, 255) * 100).coerceAtLeast(200)
-        ControlMode.Flow -> cleanFrames.size * LedPreviewStepMillis
-        ControlMode.Disco -> 8 * LedPreviewStepMillis
+        ControlMode.Breath -> (state.breathPeriod.coerceIn(1, 255) * 20).coerceAtLeast(40)
+        ControlMode.Flow -> (cleanFrames.size * state.flowInterval.coerceIn(1, 255) * 10).coerceAtLeast(10)
+        ControlMode.Disco -> 8 * LedPreviewDiscoStepMillis
         ControlMode.Gradient,
-        ControlMode.FlowGradient -> (state.period.coerceIn(1, 255) * 50).coerceAtLeast(50)
-        else -> LedPreviewStepMillis
+        ControlMode.FlowGradient -> (state.gradientPeriod.coerceIn(1, 255) * 50).coerceAtLeast(50)
+        else -> LedPreviewDiscoStepMillis
     }
     var progress by remember { mutableStateOf(0f) }
 
-    LaunchedEffect(state.mode, state.period, cleanFrames) {
+    LaunchedEffect(state.mode, state.flowInterval, state.breathPeriod, state.gradientPeriod, cleanFrames) {
         val startMillis = withFrameMillis { it }
         while (true) {
             val frameMillis = withFrameMillis { it }
@@ -1237,7 +1237,7 @@ private fun ControlSection(
     onMode: (ControlMode) -> Unit,
     onColor: (Int, Int, Int) -> Unit,
     onBrightness: (Int) -> Unit,
-    onPeriod: (Int) -> Unit,
+    onActivePeriod: (Int) -> Unit,
     onToggleLed: (Int) -> Unit,
     onOrder: (List<Int>) -> Unit,
     onToggleFlowFrameLed: (Int, Int) -> Unit,
@@ -1295,22 +1295,31 @@ private fun ControlSection(
             range = 0..255,
             onValue = onBrightness
         )
+        if (state.mode == ControlMode.Flow) {
+            NumberSlider(
+                label = "流水间隔 x10ms",
+                value = state.flowInterval,
+                range = 1..255,
+                valueHint = durationSecondsText(state.flowInterval.coerceIn(1, 255) * 10),
+                onValue = onActivePeriod
+            )
+        }
         if (state.mode == ControlMode.Breath) {
             NumberSlider(
-                label = "呼吸周期 x100ms",
-                value = state.period,
+                label = "呼吸周期 x20ms",
+                value = state.breathPeriod,
                 range = 1..255,
-                valueHint = durationSecondsText(state.period.coerceIn(1, 255) * 100),
-                onValue = onPeriod
+                valueHint = durationSecondsText(state.breathPeriod.coerceIn(1, 255) * 20),
+                onValue = onActivePeriod
             )
         }
         if (state.mode.isGradientFamily) {
             NumberSlider(
                 label = "渐变周期 x50ms",
-                value = state.period,
+                value = state.gradientPeriod,
                 range = 1..255,
-                valueHint = durationSecondsText(state.period.coerceIn(1, 255) * 50),
-                onValue = onPeriod
+                valueHint = durationSecondsText(state.gradientPeriod.coerceIn(1, 255) * 50),
+                onValue = onActivePeriod
             )
         }
         if (state.mode == ControlMode.Flow) {
@@ -1347,7 +1356,14 @@ private fun durationSecondsText(durationMillis: Int): String {
     return if (seconds == roundedToInt.toFloat()) {
         "$roundedToInt 秒"
     } else {
-        "${(seconds * 10).roundToInt() / 10f} 秒"
+        val scaled = (seconds * 100).roundToInt()
+        val integerPart = scaled / 100
+        val fractionalPart = scaled % 100
+        if (fractionalPart % 10 == 0) {
+            "$integerPart.${fractionalPart / 10} 秒"
+        } else {
+            "$integerPart.${fractionalPart.toString().padStart(2, '0')} 秒"
+        }
     }
 }
 

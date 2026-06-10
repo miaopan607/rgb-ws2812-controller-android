@@ -18,13 +18,21 @@ class RgbFrameBuilderTest {
                 green = 0,
                 blue = 0,
                 brightness = 128,
-                period = 20,
                 flowFrames = listOf(0x08, 0x04, 0x02, 0x01, 0x10, 0x20, 0x40, 0x80)
             )
         )
 
+        assertEquals(0x14, frame.period)
         assertEquals(listOf(0x00), frame.flowFrames)
         assertEquals("AA 55 00 FF 00 00 80 14 01 00 6A", frame.spacedHex())
+    }
+
+    @Test
+    fun defaultFlowUses250msInterval() {
+        val frame = RgbFrameBuilder.build(RgbControlState.Default)
+
+        assertEquals(0x19, frame.period)
+        assertEquals("AA 55 01 00 FF 00 11 19 08 08 04 02 01 10 20 40 80 01", frame.spacedHex())
     }
 
     @Test
@@ -37,14 +45,14 @@ class RgbFrameBuilderTest {
                 green = 255,
                 blue = 0,
                 brightness = 96,
-                period = 20,
+                flowInterval = 25,
                 order = listOf(0, 1, 2, 3, 4, 5, 6, 7),
                 flowFrames = frames
             )
         )
 
         assertEquals(listOf(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80), frame.flowFrames)
-        assertEquals("AA 55 01 00 FF 00 60 14 08 01 02 04 08 10 20 40 80 7D", frame.spacedHex())
+        assertEquals("AA 55 01 00 FF 00 60 19 08 01 02 04 08 10 20 40 80 70", frame.spacedHex())
     }
 
     @Test
@@ -57,7 +65,8 @@ class RgbFrameBuilderTest {
             )
         )
 
-        assertEquals("AA 55 01 00 FF 00 60 14 04 03 0C 30 C0 71", frame.spacedHex())
+        assertEquals(0x19, frame.period)
+        assertEquals("AA 55 01 00 FF 00 60 19 04 03 0C 30 C0 7C", frame.spacedHex())
         assertEquals(4, frame.flowCount)
     }
 
@@ -68,19 +77,21 @@ class RgbFrameBuilderTest {
 
         assertEquals(spaced.spacedHex(), compact.spacedHex())
         assertEquals(ControlMode.Disco, spaced.mode)
+        assertEquals(0x14, spaced.period)
         assertEquals(listOf(0x00), spaced.flowFrames)
     }
 
     @Test
-    fun gradientModeUsesNewWireValue() {
+    fun gradientModeUsesGradientPeriodByte() {
         val frame = RgbFrameBuilder.build(
             RgbControlState.Default.copy(
                 mode = ControlMode.Gradient,
                 brightness = 64,
-                period = 20
+                gradientPeriod = 20
             )
         )
 
+        assertEquals(0x14, frame.period)
         assertEquals("AA 55 04 00 FF 00 40 14 01 00 AE", frame.spacedHex())
     }
 
@@ -90,7 +101,7 @@ class RgbFrameBuilderTest {
             RgbControlState.Default.copy(
                 mode = ControlMode.FlowGradient,
                 brightness = 64,
-                period = 20
+                gradientPeriod = 20
             )
         )
 
@@ -110,7 +121,7 @@ class RgbFrameBuilderTest {
     }
 
     @Test
-    fun breathUsesMinimalPlaceholderFrame() {
+    fun breathUses20msPeriodUnits() {
         val frame = RgbFrameBuilder.build(
             RgbControlState.Default.copy(
                 mode = ControlMode.Breath,
@@ -118,12 +129,13 @@ class RgbFrameBuilderTest {
                 green = 0,
                 blue = 255,
                 brightness = 128,
-                period = 20
+                breathPeriod = 100
             )
         )
 
+        assertEquals(0x64, frame.period)
         assertEquals(listOf(0x00), frame.flowFrames)
-        assertEquals("AA 55 02 00 00 FF 80 14 01 00 68", frame.spacedHex())
+        assertEquals("AA 55 02 00 00 FF 80 64 01 00 18", frame.spacedHex())
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -133,17 +145,17 @@ class RgbFrameBuilderTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsZeroFlowCount() {
-        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 14 00 00 00")
+        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 19 00 00 00")
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsFlowCountAboveLimit() {
-        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 14 09 01 02 04 08 10 20 40 80 7C")
+        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 19 09 01 02 04 08 10 20 40 80 71")
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsLengthThatDoesNotMatchFlowCount() {
-        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 14 08 01 02 04 08 10 20 40 FD")
+        RgbFrameBuilder.parseHex("AA 55 01 00 FF 00 60 19 08 01 02 04 08 10 20 40 F0")
     }
 
     @Test

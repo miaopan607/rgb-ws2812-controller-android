@@ -101,8 +101,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateBrightness(value: Int) =
         updateControl { it.copy(brightness = value.coerceIn(0, 255)) }
 
-    fun updatePeriod(value: Int) =
-        updateControl { it.copy(period = value.coerceIn(1, 255)) }
+    fun updateActivePeriod(value: Int) =
+        updateControl { current ->
+            val cleanValue = value.coerceIn(1, 255)
+            when (current.mode) {
+                ControlMode.Flow -> current.copy(flowInterval = cleanValue)
+                ControlMode.Breath -> current.copy(breathPeriod = cleanValue)
+                ControlMode.Gradient,
+                ControlMode.FlowGradient -> current.copy(gradientPeriod = cleanValue)
+                else -> current
+            }
+        }
 
     fun toggleOrderLed(led: Int) {
         if (led !in 0..7) return

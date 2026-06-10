@@ -52,7 +52,7 @@ object RgbFrameBuilder {
             clean.green,
             clean.blue,
             clean.brightness,
-            clean.period,
+            clean.activePeriodForMode(),
             payloadFrames.size
         ) + payloadFrames
 
@@ -67,7 +67,7 @@ object RgbFrameBuilder {
             green = clean.green,
             blue = clean.blue,
             brightness = clean.brightness,
-            period = clean.period,
+            period = clean.activePeriodForMode(),
             order = clean.order,
             flowFrames = payloadFrames,
             checksum = checksum,

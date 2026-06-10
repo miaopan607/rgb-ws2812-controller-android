@@ -70,7 +70,7 @@ class AppStorage(
 
     fun exportPortableData(presets: List<Preset>, history: List<SendHistoryItem>): String =
         JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("presets", presetsToJson(presets))
             .put("history", historyToJson(history))
             .toString(2)
@@ -114,7 +114,9 @@ class AppStorage(
                 .put("green", control.green.coerceIn(0, 255))
                 .put("blue", control.blue.coerceIn(0, 255))
                 .put("brightness", control.brightness.coerceIn(0, 255))
-                .put("period", control.period.coerceIn(1, 255))
+                .put("flowInterval", control.flowInterval.coerceIn(1, 255))
+                .put("breathPeriod", control.breathPeriod.coerceIn(1, 255))
+                .put("gradientPeriod", control.gradientPeriod.coerceIn(1, 255))
                 .put("order", JSONArray(control.order))
                 .put("flowFrames", JSONArray(control.flowFrames.map { it.coerceIn(0, 255) }))
 
@@ -132,13 +134,51 @@ class AppStorage(
             } else {
                 List(flowFramesJson.length()) { index -> flowFramesJson.optInt(index, 0) }
             }
-            return RgbControlState(
-                mode = ControlMode.fromWireValue(json.optInt("mode", ControlMode.Flow.wireValue)),
+            return restoreControlState(
+                modeValue = json.optInt("mode", ControlMode.Flow.wireValue),
                 red = json.optInt("red", 0),
                 green = json.optInt("green", 255),
                 blue = json.optInt("blue", 0),
                 brightness = json.optInt("brightness", 17),
-                period = json.optInt("period", 20),
+                flowInterval = json.optInt("flowInterval", Int.MIN_VALUE),
+                breathPeriod = json.optInt("breathPeriod", Int.MIN_VALUE),
+                gradientPeriod = json.optInt("gradientPeriod", Int.MIN_VALUE),
+                legacyPeriod = json.optInt("period", Int.MIN_VALUE),
+                order = order,
+                flowFrames = flowFrames
+            )
+        }
+
+        // 统一新旧存档恢复逻辑，避免 DataStore/JSON/测试各自复制一套默认值规则。
+        internal fun restoreControlState(
+            modeValue: Int,
+            red: Int,
+            green: Int,
+            blue: Int,
+            brightness: Int,
+            flowInterval: Int,
+            breathPeriod: Int,
+            gradientPeriod: Int,
+            legacyPeriod: Int,
+            order: List<Int>,
+            flowFrames: List<Int>
+        ): RgbControlState {
+            val legacyFallback = legacyPeriod.takeIf { it != Int.MIN_VALUE }
+            return RgbControlState(
+                mode = ControlMode.fromWireValue(modeValue),
+                red = red,
+                green = green,
+                blue = blue,
+                brightness = brightness,
+                flowInterval = flowInterval.takeIf { it != Int.MIN_VALUE }
+                    ?: legacyFallback
+                    ?: RgbControlState.DefaultFlowInterval,
+                breathPeriod = breathPeriod.takeIf { it != Int.MIN_VALUE }
+                    ?: legacyFallback
+                    ?: RgbControlState.DefaultBreathPeriod,
+                gradientPeriod = gradientPeriod.takeIf { it != Int.MIN_VALUE }
+                    ?: legacyFallback
+                    ?: RgbControlState.DefaultGradientPeriod,
                 order = order,
                 flowFrames = flowFrames
             ).clamped()

@@ -6,7 +6,7 @@
 
 - Kotlin + Jetpack Compose + Material 3 界面。
 - 支持静态、流水、呼吸、Disco、渐变、流动渐变 6 种模式。
-- 支持 RGB、亮度、呼吸周期、基础流水顺序和高级流水画面编辑。
+- 支持 RGB、亮度、流水间隔、呼吸周期、基础流水顺序和高级流水画面编辑。
 - 支持已配对设备列表、蓝牙扫描发现、SPP 连接和发送。
 - 支持 Hex 预览、复制、手动 Hex 校验发送。
 - 支持预设、发送历史、JSON 导入导出。
@@ -21,6 +21,8 @@ AA 55 mode R G B brightness period flow_count frame0 ... frameN checksum
 ```
 
 `checksum` 是从 `mode` 到最后一个 `frame` 逐字节 XOR。`flow_count` 为 `1..8`，每个 `frame` 是 1 字节灯掩码，bit0~bit7 对应 LED0~LED7。基础流水会自动转换成单 bit 画面，高级流水允许一个画面同时点亮多颗灯。
+
+字节 `period` 会按模式复用解释：流水为 `10ms` 步长，呼吸为 `20ms` 步长，渐变/流动渐变为 `50ms` 步长。
 
 ## 构建
 
