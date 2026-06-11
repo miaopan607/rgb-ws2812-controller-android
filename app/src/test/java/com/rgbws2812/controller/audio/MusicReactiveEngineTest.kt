@@ -37,6 +37,31 @@ class MusicReactiveEngineTest {
     }
 
     @Test
+    fun beatEnhancedAnalyzerRespondsMoreStronglyToHighFrequencyPulse() {
+        val sampleRate = 8_000
+        val lowAnalyzer = LowFrequencyAnalyzer(sampleRate)
+        val beatAnalyzer = BeatEnhancedAnalyzer(sampleRate)
+        val settings = MusicReactiveSettings(ambientLimit = 0, sensitivity = 120, punch = 130)
+        lowAnalyzer.updateSettings(settings)
+        beatAnalyzer.updateSettings(settings)
+        val warmup = stereoSine(sampleRate, frequency = 1_200.0, durationMillis = 80, amplitude = 0.12)
+        val pulse = stereoSine(sampleRate, frequency = 1_200.0, durationMillis = 80, amplitude = 0.62)
+
+        repeat(6) {
+            lowAnalyzer.analyzeInterleavedStereo(warmup, warmup.size)
+            beatAnalyzer.analyzeInterleavedStereo(warmup, warmup.size)
+        }
+
+        val lowLevel = lowAnalyzer.analyzeInterleavedStereo(pulse, pulse.size)
+        val beatLevel = beatAnalyzer.analyzeInterleavedStereo(pulse, pulse.size)
+
+        assertTrue("beat-enhanced mode should lift high-frequency pulses more than bass-only mode", beatLevel.left > lowLevel.left + 0.08f)
+        assertTrue("beat-enhanced mode should lift high-frequency pulses more than bass-only mode", beatLevel.right > lowLevel.right + 0.08f)
+        assertTrue("beat-enhanced mode should still produce a visible response", beatLevel.left > 0.1f)
+        assertTrue("beat-enhanced mode should still produce a visible response", beatLevel.right > 0.1f)
+    }
+
+    @Test
     fun monoAnalyzerCopiesLevelToLeftAndRight() {
         val sampleRate = 8_000
         val analyzer = LowFrequencyAnalyzer(sampleRate)

@@ -1,5 +1,7 @@
 package com.rgbws2812.controller.model
 
+import com.rgbws2812.controller.audio.MusicReactiveSettings
+
 data class DeviceInfo(
     val name: String,
     val address: String,
@@ -50,6 +52,7 @@ data class AppStorageState(
     val autoSendEnabled: Boolean = false,
     val showAdvancedSendPanel: Boolean = false,
     val useAdvancedFlowEditor: Boolean = false,
+    val musicSettings: MusicReactiveSettings = MusicReactiveSettings(),
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList()
 )

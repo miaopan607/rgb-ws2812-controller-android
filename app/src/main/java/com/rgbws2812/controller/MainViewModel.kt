@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rgbws2812.controller.audio.AudioLevelCapture
 import com.rgbws2812.controller.audio.MediaProjectionPermission
+import com.rgbws2812.controller.audio.MusicReactiveDetectionMode
 import com.rgbws2812.controller.audio.MusicReactiveMapper
 import com.rgbws2812.controller.audio.MusicReactiveAudioSource
 import com.rgbws2812.controller.audio.MusicReactiveRuntimeState
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -64,10 +66,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val audioCapture = AudioLevelCapture(application, viewModelScope)
     private val manualState = MutableStateFlow(ManualUiState())
     private val musicState = MutableStateFlow(MusicUiState())
+    @Volatile
+    private var currentMusicSettings = MusicReactiveSettings()
     private var autoSendJob: Job? = null
     private var realtimeSendJob: Job? = null
     private var realtimeSendInFlight = false
     private var realtimeSequence = 0
+
+    init {
+        viewModelScope.launch {
+            storage.state.collect { storageState ->
+                currentMusicSettings = storageState.musicSettings.clamped()
+            }
+        }
+    }
 
     val uiState: StateFlow<MainUiState> =
         combine(
@@ -100,7 +112,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 presets = storageState.presets,
                 history = storageState.history,
                 bluetooth = bluetoothState,
-                musicSettings = music.settings,
+                musicSettings = storageState.musicSettings,
                 musicRuntime = musicRuntime,
                 manualHex = manual.manualHex,
                 importExportText = manual.importExportText,
@@ -285,34 +297,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setMusicMaxBrightness(value: Int) {
-        musicState.update { it.copy(settings = it.settings.copy(maxBrightness = value).clamped()) }
+        persistMusicSettings { it.copy(maxBrightness = value).clamped() }
     }
 
     fun setMusicSensitivity(value: Int) {
-        musicState.update { current ->
-            current.copy(settings = current.settings.copy(sensitivity = value).clamped())
-        }
-        audioCapture.updateSettings(musicState.value.settings)
+        persistMusicSettings { it.copy(sensitivity = value).clamped() }
     }
 
     fun setMusicPunch(value: Int) {
-        musicState.update { current ->
-            current.copy(settings = current.settings.copy(punch = value).clamped())
-        }
-        audioCapture.updateSettings(musicState.value.settings)
+        persistMusicSettings { it.copy(punch = value).clamped() }
     }
 
     fun setMusicAmbientLimit(value: Int) {
-        musicState.update { current ->
-            current.copy(settings = current.settings.copy(ambientLimit = value).clamped())
-        }
-        audioCapture.updateSettings(musicState.value.settings)
+        persistMusicSettings { it.copy(ambientLimit = value).clamped() }
+    }
+
+    fun setMusicDetectionMode(mode: MusicReactiveDetectionMode) {
+        persistMusicSettings { it.copy(detectionMode = mode).clamped() }
     }
 
     fun setMusicAudioSource(source: MusicReactiveAudioSource) {
         val wasRunning = musicState.value.isRunning
         if (wasRunning) stopMusicReactive()
-        musicState.update { it.copy(settings = it.settings.copy(audioSource = source).clamped()) }
+        persistMusicSettings { it.copy(audioSource = source).clamped() }
+    }
+
+    private fun persistMusicSettings(transform: (MusicReactiveSettings) -> MusicReactiveSettings) {
+        val updated = transform(currentMusicSettings).clamped()
+        currentMusicSettings = updated
+        viewModelScope.launch {
+            storage.saveMusicSettings(updated)
+        }
+        audioCapture.updateSettings(updated)
     }
 
     fun hasMicrophonePermission(): Boolean = audioCapture.hasMicrophonePermission()
@@ -323,7 +339,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startMusicReactive(mediaProjectionPermission: MediaProjectionPermission? = null) {
         val state = uiState.value
-        val source = state.musicSettings.audioSource
+        val cleanSettings = currentMusicSettings.clamped()
+        val source = cleanSettings.audioSource
         if (!hasMicrophonePermission()) {
             manualState.update { it.copy(errorMessage = "需要录音权限后才能启动音乐律动") }
             return
@@ -340,20 +357,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             storage.saveControl(state.control.copy(mode = ControlMode.MusicReactive).clamped())
+            storage.saveMusicSettings(cleanSettings)
         }
-        val cleanSettings = state.musicSettings.clamped()
+        currentMusicSettings = cleanSettings
         audioCapture.updateSettings(cleanSettings)
         musicState.update {
             it.copy(
-                settings = cleanSettings,
                 isRunning = true,
                 sentFps = 0,
                 sentThisSecond = 0,
                 fpsWindowStartedAt = System.currentTimeMillis(),
                 status = if (state.bluetooth.connectionState == BluetoothConnectionState.Connected) {
-                    "${source.title}律动运行中"
+                    "${source.title} ${cleanSettings.detectionMode.title}运行中"
                 } else {
-                    "${source.title}律动预览中，未连接蓝牙"
+                    "${source.title} ${cleanSettings.detectionMode.title}预览中，未连接蓝牙"
                 }
             )
         }
@@ -564,7 +581,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         realtimeSendJob = viewModelScope.launch {
             while (true) {
                 val state = uiState.value
-                val settings = state.musicSettings.clamped()
+                val settings = currentMusicSettings.clamped()
                 if (!state.musicRuntime.isRunning) {
                     return@launch
                 }
@@ -588,10 +605,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateRealtimePreviewTick() {
+        val source = currentMusicSettings.audioSource
         musicState.update { current ->
             val now = System.currentTimeMillis()
             val elapsed = now - current.fpsWindowStartedAt
-            val source = current.settings.audioSource
             if (elapsed >= 1_000L) {
                 val fps = current.sentThisSecond + 1
                 current.copy(
@@ -609,10 +626,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun sendRealtimeFrame(frame: RealtimeFrame) {
         val result = bluetoothClient.send(frame.bytes)
         result.onSuccess {
+            val source = currentMusicSettings.audioSource
             musicState.update { current ->
                 val now = System.currentTimeMillis()
                 val elapsed = now - current.fpsWindowStartedAt
-                val source = current.settings.audioSource
                 if (elapsed >= 1_000L) {
                     val sentFps = current.sentThisSecond + 1
                     current.copy(
@@ -664,7 +681,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private data class MusicUiState(
-        val settings: MusicReactiveSettings = MusicReactiveSettings(),
         val isRunning: Boolean = false,
         val sentFps: Int = 0,
         val sentThisSecond: Int = 0,

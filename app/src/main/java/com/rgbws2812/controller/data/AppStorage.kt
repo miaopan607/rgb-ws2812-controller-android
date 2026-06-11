@@ -5,6 +5,9 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.rgbws2812.controller.audio.MusicReactiveAudioSource
+import com.rgbws2812.controller.audio.MusicReactiveDetectionMode
+import com.rgbws2812.controller.audio.MusicReactiveSettings
 import com.rgbws2812.controller.model.AppStorageState
 import com.rgbws2812.controller.model.ControlMode
 import com.rgbws2812.controller.model.Preset
@@ -34,6 +37,7 @@ class AppStorage(
                 autoSendEnabled = preferences[AutoSendKey] ?: false,
                 showAdvancedSendPanel = preferences[ShowAdvancedSendPanelKey] ?: false,
                 useAdvancedFlowEditor = preferences[UseAdvancedFlowEditorKey] ?: false,
+                musicSettings = preferences[MusicSettingsKey]?.let { decodeMusicSettings(it) } ?: MusicReactiveSettings(),
                 presets = preferences[PresetsKey]?.let { decodePresets(it) } ?: emptyList(),
                 history = preferences[HistoryKey]?.let { decodeHistory(it) } ?: emptyList()
             )
@@ -60,6 +64,12 @@ class AppStorage(
     suspend fun saveUseAdvancedFlowEditor(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[UseAdvancedFlowEditorKey] = enabled
+        }
+    }
+
+    suspend fun saveMusicSettings(settings: MusicReactiveSettings) {
+        dataStore.edit { preferences ->
+            preferences[MusicSettingsKey] = encodeMusicSettings(settings)
         }
     }
 
@@ -101,6 +111,7 @@ class AppStorage(
         private val AutoSendKey = booleanPreferencesKey("auto_send")
         private val ShowAdvancedSendPanelKey = booleanPreferencesKey("show_advanced_send_panel")
         private val UseAdvancedFlowEditorKey = booleanPreferencesKey("use_advanced_flow_editor")
+        private val MusicSettingsKey = stringPreferencesKey("music_settings")
         private val PresetsKey = stringPreferencesKey("presets")
         private val HistoryKey = stringPreferencesKey("history")
         const val MaxHistoryItems = 60
@@ -122,6 +133,12 @@ class AppStorage(
         fun decodeHistory(json: String): List<SendHistoryItem> = runCatching {
             jsonToHistory(JSONArray(json))
         }.getOrDefault(emptyList())
+
+        fun encodeMusicSettings(settings: MusicReactiveSettings): String = musicSettingsToJson(settings).toString()
+
+        fun decodeMusicSettings(json: String): MusicReactiveSettings = runCatching {
+            jsonToMusicSettings(JSONObject(json))
+        }.getOrDefault(MusicReactiveSettings())
 
         private fun controlToJson(control: RgbControlState): JSONObject =
             JSONObject()
@@ -261,5 +278,33 @@ class AppStorage(
                 }
                 .filter { it.hex.isNotBlank() }
                 .take(MaxHistoryItems)
+
+        private fun musicSettingsToJson(settings: MusicReactiveSettings): JSONObject =
+            JSONObject()
+                .put("maxBrightness", settings.maxBrightness)
+                .put("targetFps", settings.targetFps)
+                .put("sensitivity", settings.sensitivity)
+                .put("punch", settings.punch)
+                .put("ambientLimit", settings.ambientLimit)
+                .put("detectionMode", settings.detectionMode.name)
+                .put("audioSource", settings.audioSource.name)
+
+        private fun jsonToMusicSettings(json: JSONObject): MusicReactiveSettings {
+            val audioSource = runCatching {
+                MusicReactiveAudioSource.valueOf(json.optString("audioSource", MusicReactiveAudioSource.Microphone.name))
+            }.getOrDefault(MusicReactiveAudioSource.Microphone)
+            val detectionMode = runCatching {
+                MusicReactiveDetectionMode.valueOf(json.optString("detectionMode", MusicReactiveDetectionMode.LowFrequency.name))
+            }.getOrDefault(MusicReactiveDetectionMode.LowFrequency)
+            return MusicReactiveSettings(
+                maxBrightness = json.optInt("maxBrightness", 64),
+                targetFps = json.optInt("targetFps", 20),
+                sensitivity = json.optInt("sensitivity", 115),
+                punch = json.optInt("punch", 125),
+                ambientLimit = json.optInt("ambientLimit", 10),
+                detectionMode = detectionMode,
+                audioSource = audioSource
+            ).clamped()
+        }
     }
 }

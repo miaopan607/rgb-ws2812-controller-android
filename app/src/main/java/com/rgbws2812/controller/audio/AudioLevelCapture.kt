@@ -32,16 +32,27 @@ class AudioLevelCapture(
     private val microphoneChannelConfig = AudioFormat.CHANNEL_IN_MONO
     private val playbackChannelConfig = AudioFormat.CHANNEL_IN_STEREO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-    private val analyzer = LowFrequencyAnalyzer(sampleRate)
+    private val lowFrequencyAnalyzer = LowFrequencyAnalyzer(sampleRate)
+    private val beatEnhancedAnalyzer = BeatEnhancedAnalyzer(sampleRate)
     private var captureJob: Job? = null
     private var audioRecord: AudioRecord? = null
     private var mediaProjection: MediaProjection? = null
+    @Volatile
+    private var currentSettings = MusicReactiveSettings()
 
     private val _state = MutableStateFlow(AudioCaptureState())
     val state: StateFlow<AudioCaptureState> = _state
 
     fun updateSettings(settings: MusicReactiveSettings) {
-        analyzer.updateSettings(settings)
+        val cleanSettings = settings.clamped()
+        val modeChanged = cleanSettings.detectionMode != currentSettings.detectionMode
+        currentSettings = cleanSettings
+        lowFrequencyAnalyzer.updateSettings(cleanSettings)
+        beatEnhancedAnalyzer.updateSettings(cleanSettings)
+        if (modeChanged) {
+            lowFrequencyAnalyzer.reset()
+            beatEnhancedAnalyzer.reset()
+        }
     }
 
     suspend fun start(source: MusicReactiveAudioSource, mediaProjectionPermission: MediaProjectionPermission? = null): Boolean {
@@ -64,7 +75,8 @@ class AudioLevelCapture(
     fun stop() {
         captureJob?.cancel()
         captureJob = null
-        analyzer.reset()
+        lowFrequencyAnalyzer.reset()
+        beatEnhancedAnalyzer.reset()
         runCatching { audioRecord?.stop() }
         runCatching { audioRecord?.release() }
         audioRecord = null
@@ -189,6 +201,10 @@ class AudioLevelCapture(
                 when {
                     count > 0 -> {
                         totalRead += count
+                        val analyzer = when (currentSettings.detectionMode) {
+                            MusicReactiveDetectionMode.LowFrequency -> lowFrequencyAnalyzer
+                            MusicReactiveDetectionMode.BeatEnhanced -> beatEnhancedAnalyzer
+                        }
                         val level = when (source) {
                             MusicReactiveAudioSource.Microphone -> analyzer.analyzeMonoAsStereo(buffer, count)
                             MusicReactiveAudioSource.SystemPlayback -> analyzer.analyzeInterleavedStereo(buffer, count)

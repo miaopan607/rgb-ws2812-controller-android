@@ -11,7 +11,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
 import android.content.pm.PackageManager
-import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -135,6 +134,7 @@ import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.RgbColor
 import com.rgbws2812.controller.model.SendHistoryItem
 import com.rgbws2812.controller.audio.MediaProjectionPermission
+import com.rgbws2812.controller.audio.MusicReactiveDetectionMode
 import com.rgbws2812.controller.audio.MusicReactiveAudioSource
 import com.rgbws2812.controller.model.isGradientFamily
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
@@ -195,14 +195,42 @@ private val FlowOrderPresets = listOf(
 )
 
 private fun rgbToHsv(red: Int, green: Int, blue: Int): HsvColor {
-    val hsv = FloatArray(3)
-    AndroidColor.RGBToHSV(red, green, blue, hsv)
-    return HsvColor(hsv[0], hsv[1], hsv[2])
+    val r = red.coerceIn(0, 255) / 255f
+    val g = green.coerceIn(0, 255) / 255f
+    val b = blue.coerceIn(0, 255) / 255f
+    val max = maxOf(r, g, b)
+    val min = minOf(r, g, b)
+    val delta = max - min
+    val hue = when {
+        delta == 0f -> 0f
+        max == r -> ((60f * ((g - b) / delta) + 360f) % 360f)
+        max == g -> (60f * ((b - r) / delta) + 120f)
+        else -> (60f * ((r - g) / delta) + 240f)
+    }
+    val saturation = if (max <= 0f) 0f else delta / max
+    return HsvColor(hue, saturation, max)
 }
 
 private fun hsvToRgb(hue: Float, saturation: Float, value: Float): Triple<Int, Int, Int> {
-    val color = AndroidColor.HSVToColor(floatArrayOf(hue.coerceIn(0f, 360f), saturation.coerceIn(0f, 1f), value.coerceIn(0f, 1f)))
-    return Triple(AndroidColor.red(color), AndroidColor.green(color), AndroidColor.blue(color))
+    val h = ((hue % 360f) + 360f) % 360f
+    val s = saturation.coerceIn(0f, 1f)
+    val v = value.coerceIn(0f, 1f)
+    val c = v * s
+    val x = c * (1f - kotlin.math.abs((h / 60f) % 2f - 1f))
+    val m = v - c
+    val (r1, g1, b1) = when {
+        h < 60f -> Triple(c, x, 0f)
+        h < 120f -> Triple(x, c, 0f)
+        h < 180f -> Triple(0f, c, x)
+        h < 240f -> Triple(0f, x, c)
+        h < 300f -> Triple(x, 0f, c)
+        else -> Triple(c, 0f, x)
+    }
+    return Triple(
+        ((r1 + m) * 255f).roundToInt().coerceIn(0, 255),
+        ((g1 + m) * 255f).roundToInt().coerceIn(0, 255),
+        ((b1 + m) * 255f).roundToInt().coerceIn(0, 255)
+    )
 }
 
 internal fun replaceHuePreservingColor(hue: Float, saturation: Float, value: Float): Triple<Int, Int, Int> =
@@ -481,6 +509,7 @@ private fun ControllerContent(
         onMusicSensitivity = { viewModel.setMusicSensitivity(it) },
         onMusicPunch = { viewModel.setMusicPunch(it) },
         onMusicAmbientLimit = { viewModel.setMusicAmbientLimit(it) },
+        onMusicDetectionMode = { viewModel.setMusicDetectionMode(it) },
         onMusicAudioSource = { viewModel.setMusicAudioSource(it) },
         microphonePermissionGranted = microphonePermissionGranted,
         onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -579,6 +608,7 @@ private fun ControllerPage(
     onMusicSensitivity: (Int) -> Unit,
     onMusicPunch: (Int) -> Unit,
     onMusicAmbientLimit: (Int) -> Unit,
+    onMusicDetectionMode: (MusicReactiveDetectionMode) -> Unit,
     onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     microphonePermissionGranted: Boolean,
     onRequestMicrophonePermission: () -> Unit,
@@ -637,6 +667,7 @@ private fun ControllerPage(
                     onMusicSensitivity = onMusicSensitivity,
                     onMusicPunch = onMusicPunch,
                     onMusicAmbientLimit = onMusicAmbientLimit,
+                    onMusicDetectionMode = onMusicDetectionMode,
                     onMusicAudioSource = onMusicAudioSource,
                     microphonePermissionGranted = microphonePermissionGranted,
                     onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -680,6 +711,7 @@ private fun ControllerPage(
                     onMusicSensitivity = onMusicSensitivity,
                     onMusicPunch = onMusicPunch,
                     onMusicAmbientLimit = onMusicAmbientLimit,
+                    onMusicDetectionMode = onMusicDetectionMode,
                     onMusicAudioSource = onMusicAudioSource,
                     microphonePermissionGranted = microphonePermissionGranted,
                     onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -731,6 +763,7 @@ private fun ControllerPage(
                 onMusicSensitivity = onMusicSensitivity,
                 onMusicPunch = onMusicPunch,
                 onMusicAmbientLimit = onMusicAmbientLimit,
+                onMusicDetectionMode = onMusicDetectionMode,
                 onMusicAudioSource = onMusicAudioSource,
                 microphonePermissionGranted = microphonePermissionGranted,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
@@ -776,6 +809,7 @@ private fun ControllerPageList(
     onMusicSensitivity: (Int) -> Unit,
     onMusicPunch: (Int) -> Unit,
     onMusicAmbientLimit: (Int) -> Unit,
+    onMusicDetectionMode: (MusicReactiveDetectionMode) -> Unit,
     onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     microphonePermissionGranted: Boolean,
     onRequestMicrophonePermission: () -> Unit,
@@ -826,6 +860,7 @@ private fun ControllerPageList(
                 onMusicSensitivity = onMusicSensitivity,
                 onMusicPunch = onMusicPunch,
                 onMusicAmbientLimit = onMusicAmbientLimit,
+                onMusicDetectionMode = onMusicDetectionMode,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
                 onMusicAudioSource = onMusicAudioSource,
                 onRequestSystemAudioCapture = onRequestSystemAudioCapture,
@@ -1545,6 +1580,7 @@ private fun ControlSection(
     onMusicSensitivity: (Int) -> Unit,
     onMusicPunch: (Int) -> Unit,
     onMusicAmbientLimit: (Int) -> Unit,
+    onMusicDetectionMode: (MusicReactiveDetectionMode) -> Unit,
     onMusicAudioSource: (MusicReactiveAudioSource) -> Unit,
     onRequestMicrophonePermission: () -> Unit,
     onRequestSystemAudioCapture: () -> Unit
@@ -1595,6 +1631,7 @@ private fun ControlSection(
                 onSensitivity = onMusicSensitivity,
                 onPunch = onMusicPunch,
                 onAmbientLimit = onMusicAmbientLimit,
+                onDetectionMode = onMusicDetectionMode,
                 onAudioSource = onMusicAudioSource,
                 onRequestMicrophonePermission = onRequestMicrophonePermission,
                 onRequestSystemAudioCapture = onRequestSystemAudioCapture
@@ -1670,6 +1707,7 @@ private fun MusicReactiveControls(
     onSensitivity: (Int) -> Unit,
     onPunch: (Int) -> Unit,
     onAmbientLimit: (Int) -> Unit,
+    onDetectionMode: (MusicReactiveDetectionMode) -> Unit,
     onAudioSource: (MusicReactiveAudioSource) -> Unit,
     onRequestMicrophonePermission: () -> Unit,
     onRequestSystemAudioCapture: () -> Unit
@@ -1684,6 +1722,18 @@ private fun MusicReactiveControls(
                 enabled = enabled && !runtime.isRunning,
                 onClick = { onAudioSource(source) },
                 label = { Text(source.title) }
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(14.dp))
+    SectionSubheading("检测模式")
+    Spacer(modifier = Modifier.height(8.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MusicReactiveDetectionMode.entries.forEach { mode ->
+            FilterChip(
+                selected = settings.detectionMode == mode,
+                onClick = { onDetectionMode(mode) },
+                label = { Text(mode.title) }
             )
         }
     }
@@ -1702,6 +1752,15 @@ private fun MusicReactiveControls(
                 }
         },
         style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = when (settings.detectionMode) {
+            MusicReactiveDetectionMode.LowFrequency -> "低频更偏向鼓点和贝斯，保留当前手感。"
+            MusicReactiveDetectionMode.BeatEnhanced -> "节拍增强会额外看中高频瞬态，更容易抓住短促鼓点。"
+        },
+        style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     if (!microphonePermissionGranted) {
