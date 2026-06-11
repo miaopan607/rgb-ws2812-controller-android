@@ -9,6 +9,7 @@ package com.rgbws2812.controller
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import android.os.Build
@@ -58,6 +59,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Button
@@ -111,6 +114,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -119,6 +123,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rgbws2812.controller.model.BluetoothConnectionState
 import com.rgbws2812.controller.model.ControlMode
@@ -1835,13 +1841,58 @@ private fun ColorControls(
     onColor: (Int, Int, Int) -> Unit
 ) {
     var advancedExpanded by remember { mutableStateOf(false) }
-    var customSelected by remember { mutableStateOf(!isBasicPaletteColor(state.red, state.green, state.blue)) }
-    var customPanelExpanded by remember { mutableStateOf(false) }
     var rememberedCustomColor by remember { mutableStateOf(Triple(state.red, state.green, state.blue).takeUnless { isBasicPaletteColor(it.first, it.second, it.third) } ?: Triple(255, 160, 64)) }
-    val updateCustomColor: (Int, Int, Int) -> Unit = { red, green, blue ->
-        rememberedCustomColor = Triple(red, green, blue)
+    var customSelected by remember { mutableStateOf(!isBasicPaletteColor(state.red, state.green, state.blue)) }
+    var customDialogVisible by remember { mutableStateOf(false) }
+    var customDraftColor by remember { mutableStateOf(rememberedCustomColor) }
+    var pendingCommittedColor by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+
+    fun commitColor(red: Int, green: Int, blue: Int) {
+        pendingCommittedColor = Triple(red, green, blue)
         onColor(red, green, blue)
     }
+
+    LaunchedEffect(state.red, state.green, state.blue) {
+        val currentColor = Triple(state.red, state.green, state.blue)
+        if (pendingCommittedColor == currentColor) {
+            pendingCommittedColor = null
+            return@LaunchedEffect
+        }
+        pendingCommittedColor = null
+        if (customSelected) {
+            rememberedCustomColor = currentColor
+        } else if (!isBasicPaletteColor(state.red, state.green, state.blue)) {
+            customSelected = true
+            rememberedCustomColor = currentColor
+        } else {
+            customSelected = false
+        }
+    }
+
+    if (customDialogVisible) {
+        CustomColorDialog(
+            color = Triple(state.red, state.green, state.blue),
+            onConfirm = { red, green, blue ->
+                rememberedCustomColor = Triple(red, green, blue)
+                customSelected = true
+                commitColor(red, green, blue)
+                customDialogVisible = false
+                advancedExpanded = false
+            },
+            onDismiss = {
+                customDialogVisible = false
+                advancedExpanded = false
+            },
+            onDraftColorChange = { red, green, blue ->
+                customDraftColor = Triple(red, green, blue)
+            },
+            draftColor = customDraftColor,
+            onDraftColorReset = {
+                customDraftColor = Triple(state.red, state.green, state.blue)
+            }
+        )
+    }
+
     val hsv = rgbToHsv(state.red, state.green, state.blue)
     val displayHue = if (hsv.saturation == 0f && hsv.value == 0f) 0f else hsv.hue
     val hueColor = colorForHue(displayHue)
@@ -1856,9 +1907,9 @@ private fun ColorControls(
                     selected = !customSelected && state.red == color.red && state.green == color.green && state.blue == color.blue,
                     onClick = {
                         customSelected = false
-                        customPanelExpanded = false
                         advancedExpanded = false
-                        onColor(color.red, color.green, color.blue)
+                        commitColor(color.red, color.green, color.blue)
+                        customDialogVisible = false
                     }
                 )
             }
@@ -1867,91 +1918,230 @@ private fun ColorControls(
                 color = Color(rememberedCustomColor.first, rememberedCustomColor.second, rememberedCustomColor.third),
                 checkColor = checkMarkColor(rememberedCustomColor.first, rememberedCustomColor.second, rememberedCustomColor.third),
                 onClick = {
-                    customSelected = true
-                    customPanelExpanded = true
-                    onColor(rememberedCustomColor.first, rememberedCustomColor.second, rememberedCustomColor.third)
+                    if (customSelected) {
+                        customDraftColor = Triple(state.red, state.green, state.blue)
+                        customDialogVisible = true
+                    } else {
+                        customSelected = true
+                        commitColor(rememberedCustomColor.first, rememberedCustomColor.second, rememberedCustomColor.third)
+                    }
                 }
             )
         }
+    }
+}
 
-        if (customSelected && customPanelExpanded) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(
+@Composable
+private fun CustomColorDialog(
+    color: Triple<Int, Int, Int>,
+    draftColor: Triple<Int, Int, Int>,
+    onDraftColorChange: (Int, Int, Int) -> Unit,
+    onDraftColorReset: () -> Unit,
+    onConfirm: (Int, Int, Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var advancedExpanded by remember { mutableStateOf(false) }
+    val currentDraft = draftColor
+    val hsv = rgbToHsv(currentDraft.first, currentDraft.second, currentDraft.third)
+    val displayHue = if (hsv.saturation == 0f && hsv.value == 0f) 0f else hsv.hue
+    val hueColor = colorForHue(displayHue)
+    val dialogMaxHeight = (configuration.screenHeightDp * 0.88f).dp
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(color) {
+        onDraftColorReset()
+        advancedExpanded = false
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .widthIn(max = 920.dp)
+                .heightIn(max = dialogMaxHeight),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(
                     modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color(state.red, state.green, state.blue))
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(state.rgbHex, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "RGB ${state.red}, ${state.green}, ${state.blue}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TextButton(onClick = {
-                    customPanelExpanded = false
-                    advancedExpanded = false
-                }) {
-                    EyeOffIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("隐藏调色板")
-                }
-            }
-            SaturationValuePicker(
-                hue = displayHue,
-                saturation = hsv.saturation,
-                value = hsv.value,
-                onColor = { saturation, value ->
-                    val rgb = hsvToRgb(displayHue, saturation, value)
-                    updateCustomColor(rgb.first, rgb.second, rgb.third)
-                }
-            )
-            ColorGradientSlider(
-                label = "色相",
-                value = displayHue,
-                valueRange = 0f..360f,
-                brush = Brush.horizontalGradient(
-                    listOf(
-                        Color.Red,
-                        Color.Yellow,
-                        Color.Green,
-                        Color.Cyan,
-                        Color.Blue,
-                        Color.Magenta,
-                        Color.Red
-                    )
-                ),
-                valueText = "${displayHue.roundToInt()}°",
-                onValue = { hue ->
-                    val rgb = hsvToRgb(hue, hsv.saturation.takeIf { it > 0f } ?: 1f, hsv.value.takeIf { it > 0f } ?: 1f)
-                    updateCustomColor(rgb.first, rgb.second, rgb.third)
-                }
-            )
-            ColorGradientSlider(
-                label = "明度",
-                value = hsv.value * 100f,
-                valueRange = 0f..100f,
-                brush = Brush.horizontalGradient(listOf(Color.Black, hueColor)),
-                valueText = "${(hsv.value * 100f).roundToInt()}%",
-                onValue = { value ->
-                    val rgb = hsvToRgb(displayHue, hsv.saturation.takeIf { it > 0f } ?: 1f, value / 100f)
-                    updateCustomColor(rgb.first, rgb.second, rgb.third)
-                }
-            )
+                        .weight(1f, fill = false)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("自定义颜色", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(
+                            "调整完成后点“确定”保存，点“取消”放弃本次修改。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
 
-            TextButton(onClick = { advancedExpanded = !advancedExpanded }) {
-                ExpandCollapseIcon(expanded = advancedExpanded, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(if (advancedExpanded) "收起 RGB 精调" else "展开 RGB 精调")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Color(currentDraft.first, currentDraft.second, currentDraft.third))
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = Color(currentDraft.first, currentDraft.second, currentDraft.third).toRgbHex(), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "RGB ${currentDraft.first}, ${currentDraft.second}, ${currentDraft.third}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (isLandscape) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1.1f),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                SaturationValuePicker(
+                                    hue = displayHue,
+                                    saturation = hsv.saturation,
+                                    value = hsv.value,
+                                    onColor = { saturation, value ->
+                                        val rgb = hsvToRgb(displayHue, saturation, value)
+                                        onDraftColorChange(rgb.first, rgb.second, rgb.third)
+                                    }
+                                )
+                            }
+                            Column(
+                                modifier = Modifier.weight(0.9f),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                ColorGradientSlider(
+                                    label = "色相",
+                                    value = displayHue,
+                                    valueRange = 0f..360f,
+                                    brush = Brush.horizontalGradient(
+                                        listOf(
+                                            Color.Red,
+                                            Color.Yellow,
+                                            Color.Green,
+                                            Color.Cyan,
+                                            Color.Blue,
+                                            Color.Magenta,
+                                            Color.Red
+                                        )
+                                    ),
+                                    valueText = "${displayHue.roundToInt()}°",
+                                    onValue = { hue ->
+                                        val rgb = hsvToRgb(hue, hsv.saturation.takeIf { it > 0f } ?: 1f, hsv.value.takeIf { it > 0f } ?: 1f)
+                                        onDraftColorChange(rgb.first, rgb.second, rgb.third)
+                                    }
+                                )
+                                ColorGradientSlider(
+                                    label = "明度",
+                                    value = hsv.value * 100f,
+                                    valueRange = 0f..100f,
+                                    brush = Brush.horizontalGradient(listOf(Color.Black, hueColor)),
+                                    valueText = "${(hsv.value * 100f).roundToInt()}%",
+                                    onValue = { value ->
+                                        val rgb = hsvToRgb(displayHue, hsv.saturation.takeIf { it > 0f } ?: 1f, value / 100f)
+                                        onDraftColorChange(rgb.first, rgb.second, rgb.third)
+                                    }
+                                )
+                                TextButton(onClick = { advancedExpanded = !advancedExpanded }) {
+                                    ExpandCollapseIcon(expanded = advancedExpanded, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(if (advancedExpanded) "收起 RGB 精调" else "展开 RGB 精调")
+                                }
+                                if (advancedExpanded) {
+                                    CompactRgbSlider("R", currentDraft.first) { onDraftColorChange(it, currentDraft.second, currentDraft.third) }
+                                    CompactRgbSlider("G", currentDraft.second) { onDraftColorChange(currentDraft.first, it, currentDraft.third) }
+                                    CompactRgbSlider("B", currentDraft.third) { onDraftColorChange(currentDraft.first, currentDraft.second, it) }
+                                }
+                            }
+                        }
+                    } else {
+                        SaturationValuePicker(
+                            hue = displayHue,
+                            saturation = hsv.saturation,
+                            value = hsv.value,
+                            onColor = { saturation, value ->
+                                val rgb = hsvToRgb(displayHue, saturation, value)
+                                onDraftColorChange(rgb.first, rgb.second, rgb.third)
+                            }
+                        )
+                        ColorGradientSlider(
+                            label = "色相",
+                            value = displayHue,
+                            valueRange = 0f..360f,
+                            brush = Brush.horizontalGradient(
+                                listOf(
+                                    Color.Red,
+                                    Color.Yellow,
+                                    Color.Green,
+                                    Color.Cyan,
+                                    Color.Blue,
+                                    Color.Magenta,
+                                    Color.Red
+                                )
+                            ),
+                            valueText = "${displayHue.roundToInt()}°",
+                            onValue = { hue ->
+                                val rgb = hsvToRgb(hue, hsv.saturation.takeIf { it > 0f } ?: 1f, hsv.value.takeIf { it > 0f } ?: 1f)
+                                onDraftColorChange(rgb.first, rgb.second, rgb.third)
+                            }
+                        )
+                        ColorGradientSlider(
+                            label = "明度",
+                            value = hsv.value * 100f,
+                            valueRange = 0f..100f,
+                            brush = Brush.horizontalGradient(listOf(Color.Black, hueColor)),
+                            valueText = "${(hsv.value * 100f).roundToInt()}%",
+                            onValue = { value ->
+                                val rgb = hsvToRgb(displayHue, hsv.saturation.takeIf { it > 0f } ?: 1f, value / 100f)
+                                onDraftColorChange(rgb.first, rgb.second, rgb.third)
+                            }
+                        )
+                        TextButton(onClick = { advancedExpanded = !advancedExpanded }) {
+                            ExpandCollapseIcon(expanded = advancedExpanded, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (advancedExpanded) "收起 RGB 精调" else "展开 RGB 精调")
+                        }
+                        if (advancedExpanded) {
+                            CompactRgbSlider("R", currentDraft.first) { onDraftColorChange(it, currentDraft.second, currentDraft.third) }
+                            CompactRgbSlider("G", currentDraft.second) { onDraftColorChange(currentDraft.first, it, currentDraft.third) }
+                            CompactRgbSlider("B", currentDraft.third) { onDraftColorChange(currentDraft.first, currentDraft.second, it) }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("取消")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onConfirm(currentDraft.first, currentDraft.second, currentDraft.third) }) {
+                        Text("确定")
+                    }
+                }
             }
-            if (advancedExpanded) {
-                CompactRgbSlider("R", state.red) { updateCustomColor(it, state.green, state.blue) }
-                CompactRgbSlider("G", state.green) { updateCustomColor(state.red, it, state.blue) }
-                CompactRgbSlider("B", state.blue) { updateCustomColor(state.red, state.green, it) }
-            }
-            DashedDivider()
         }
     }
 }
@@ -2383,14 +2573,13 @@ private fun CustomPaletteItem(
     onClick: () -> Unit
 ) {
     val iconColor = MaterialTheme.colorScheme.onSurface
-    val backgroundColor = MaterialTheme.colorScheme.background
     PaletteOption(
         label = "自定义",
         selected = selected,
         onClick = onClick
     ) {
         val radius = size.minDimension / 2f - 2.dp.toPx()
-        drawCircle(if (selected) color else backgroundColor, radius = radius)
+        drawCircle(color, radius = radius)
         drawCircle(iconColor, radius = radius, style = Stroke(width = 2.dp.toPx()))
         if (selected) {
             drawCheckMark(checkColor)
@@ -2411,6 +2600,9 @@ private fun CustomPaletteItem(
         }
     }
 }
+
+private fun Color.toRgbHex(): String =
+    "#%02X%02X%02X".format((red * 255).roundToInt(), (green * 255).roundToInt(), (blue * 255).roundToInt())
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCheckMark(color: Color) {
     val stroke = 3.dp.toPx()
