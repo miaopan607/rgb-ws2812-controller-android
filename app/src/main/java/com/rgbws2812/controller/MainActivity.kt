@@ -205,6 +205,9 @@ private fun hsvToRgb(hue: Float, saturation: Float, value: Float): Triple<Int, I
     return Triple(AndroidColor.red(color), AndroidColor.green(color), AndroidColor.blue(color))
 }
 
+internal fun replaceHuePreservingColor(hue: Float, saturation: Float, value: Float): Triple<Int, Int, Int> =
+    hsvToRgb(hue, saturation, value)
+
 private fun colorForHue(hue: Float): Color {
     val rgb = hsvToRgb(hue, 1f, 1f)
     return Color(rgb.first, rgb.second, rgb.third)
@@ -2031,10 +2034,10 @@ private fun CustomColorDialog(
                                 modifier = Modifier.weight(0.9f),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                ColorGradientSlider(
-                                    label = "色相",
-                                    value = displayHue,
-                                    valueRange = 0f..360f,
+                            ColorGradientSlider(
+                                label = "色相",
+                                value = displayHue,
+                                valueRange = 0f..360f,
                                     brush = Brush.horizontalGradient(
                                         listOf(
                                             Color.Red,
@@ -2045,13 +2048,13 @@ private fun CustomColorDialog(
                                             Color.Magenta,
                                             Color.Red
                                         )
-                                    ),
-                                    valueText = "${displayHue.roundToInt()}°",
-                                    onValue = { hue ->
-                                        val rgb = hsvToRgb(hue, hsv.saturation.takeIf { it > 0f } ?: 1f, hsv.value.takeIf { it > 0f } ?: 1f)
-                                        onDraftColorChange(rgb.first, rgb.second, rgb.third)
-                                    }
-                                )
+                                ),
+                                valueText = "${displayHue.roundToInt()}°",
+                                onValue = { hue ->
+                                    val rgb = replaceHuePreservingColor(hue, hsv.saturation, hsv.value)
+                                    onDraftColorChange(rgb.first, rgb.second, rgb.third)
+                                }
+                            )
                                 ColorGradientSlider(
                                     label = "明度",
                                     value = hsv.value * 100f,
@@ -2102,7 +2105,7 @@ private fun CustomColorDialog(
                             ),
                             valueText = "${displayHue.roundToInt()}°",
                             onValue = { hue ->
-                                val rgb = hsvToRgb(hue, hsv.saturation.takeIf { it > 0f } ?: 1f, hsv.value.takeIf { it > 0f } ?: 1f)
+                                val rgb = replaceHuePreservingColor(hue, hsv.saturation, hsv.value)
                                 onDraftColorChange(rgb.first, rgb.second, rgb.third)
                             }
                         )
