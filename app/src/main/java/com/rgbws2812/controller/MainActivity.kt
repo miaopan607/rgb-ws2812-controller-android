@@ -132,6 +132,7 @@ import com.rgbws2812.controller.model.ControlMode
 import com.rgbws2812.controller.model.DeviceInfo
 import com.rgbws2812.controller.model.GradientPattern
 import com.rgbws2812.controller.model.Preset
+import com.rgbws2812.controller.model.RealtimeFlowFrame
 import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.RgbColor
 import com.rgbws2812.controller.model.SendHistoryItem
@@ -142,6 +143,8 @@ import com.rgbws2812.controller.audio.MusicReactiveDetectionMode
 import com.rgbws2812.controller.audio.MusicReactiveAudioSource
 import com.rgbws2812.controller.model.isGradientFamily
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
+import com.rgbws2812.controller.protocol.RealtimeFrameBuilder
+import com.rgbws2812.controller.protocol.RealtimeLed
 import com.rgbws2812.controller.protocol.toHexByte
 import com.rgbws2812.controller.ui.theme.RgbControllerTheme
 import kotlinx.coroutines.flow.collect
@@ -188,7 +191,8 @@ private val PrimaryControlModes = listOf(
     ControlMode.Breath,
     ControlMode.Disco,
     ControlMode.Gradient,
-    ControlMode.MusicReactive
+    ControlMode.MusicReactive,
+    ControlMode.CustomRealtimeFlow
 )
 private val FlowOrderPresets = listOf(
     "正序" to listOf(3, 2, 1, 0, 4, 5, 6, 7),
@@ -389,15 +393,18 @@ private fun RgbControllerApp(viewModel: MainViewModel = viewModel()) {
                         connectionState = uiState.bluetooth.connectionState,
                         currentMode = uiState.control.mode,
                         musicRunning = uiState.musicRuntime.isRunning,
+                        realtimeFlowRunning = uiState.realtimeFlowRunning,
                         flowFramesValid = uiState.flowFramesValid,
                         autoSendEnabled = uiState.autoSendEnabled,
                         showAdvancedSendPanel = uiState.showAdvancedSendPanel,
+                        realtimeFlowAddCopiesLast = uiState.realtimeFlowAddCopiesLast,
                         previewVisible = previewVisible,
                         onSendClick = handleSendClick,
                         onPreviewClick = { previewVisible = true },
                         onBluetoothClick = { currentPage = AppPage.Bluetooth },
                         onToggleAutoSend = { viewModel.setAutoSend(it) },
                         onToggleAdvancedSendPanel = { viewModel.setShowAdvancedSendPanel(it) },
+                        onToggleRealtimeFlowAddCopiesLast = { viewModel.setRealtimeFlowAddCopiesLast(it) },
                         onResetAllParameters = { viewModel.resetControlParameters() }
                     )
                 } else {
@@ -509,6 +516,13 @@ private fun ControllerContent(
         onDeleteFlowFrame = { viewModel.deleteFlowFrame(it) },
         onMoveFlowFrameUp = { viewModel.moveFlowFrameUp(it) },
         onMoveFlowFrameDown = { viewModel.moveFlowFrameDown(it) },
+        onAddRealtimeFlowFrame = { viewModel.addRealtimeFlowFrame() },
+        onDuplicateRealtimeFlowFrame = { viewModel.duplicateRealtimeFlowFrame(it) },
+        onDeleteRealtimeFlowFrame = { viewModel.deleteRealtimeFlowFrame(it) },
+        onMoveRealtimeFlowFrameUp = { viewModel.moveRealtimeFlowFrameUp(it) },
+        onMoveRealtimeFlowFrameDown = { viewModel.moveRealtimeFlowFrameDown(it) },
+        onRealtimeFlowFrameDuration = { index, value -> viewModel.setRealtimeFlowFrameDuration(index, value) },
+        onRealtimeFlowLed = { frameIndex, ledIndex, led -> viewModel.updateRealtimeFlowLed(frameIndex, ledIndex, led) },
         onMusicMaxBrightness = { viewModel.setMusicMaxBrightness(it) },
         onMusicSensitivity = { viewModel.setMusicSensitivity(it) },
         onMusicPunch = { viewModel.setMusicPunch(it) },
@@ -614,6 +628,13 @@ private fun ControllerPage(
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
+    onAddRealtimeFlowFrame: () -> Unit,
+    onDuplicateRealtimeFlowFrame: (Int) -> Unit,
+    onDeleteRealtimeFlowFrame: (Int) -> Unit,
+    onMoveRealtimeFlowFrameUp: (Int) -> Unit,
+    onMoveRealtimeFlowFrameDown: (Int) -> Unit,
+    onRealtimeFlowFrameDuration: (Int, Int) -> Unit,
+    onRealtimeFlowLed: (Int, Int, RealtimeLed) -> Unit,
     onMusicMaxBrightness: (Int) -> Unit,
     onMusicSensitivity: (Int) -> Unit,
     onMusicPunch: (Int) -> Unit,
@@ -673,6 +694,13 @@ private fun ControllerPage(
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
+                    onAddRealtimeFlowFrame = onAddRealtimeFlowFrame,
+                    onDuplicateRealtimeFlowFrame = onDuplicateRealtimeFlowFrame,
+                    onDeleteRealtimeFlowFrame = onDeleteRealtimeFlowFrame,
+                    onMoveRealtimeFlowFrameUp = onMoveRealtimeFlowFrameUp,
+                    onMoveRealtimeFlowFrameDown = onMoveRealtimeFlowFrameDown,
+                    onRealtimeFlowFrameDuration = onRealtimeFlowFrameDuration,
+                    onRealtimeFlowLed = onRealtimeFlowLed,
                     onMusicMaxBrightness = onMusicMaxBrightness,
                     onMusicSensitivity = onMusicSensitivity,
                     onMusicPunch = onMusicPunch,
@@ -717,6 +745,13 @@ private fun ControllerPage(
                     onDeleteFlowFrame = onDeleteFlowFrame,
                     onMoveFlowFrameUp = onMoveFlowFrameUp,
                     onMoveFlowFrameDown = onMoveFlowFrameDown,
+                    onAddRealtimeFlowFrame = onAddRealtimeFlowFrame,
+                    onDuplicateRealtimeFlowFrame = onDuplicateRealtimeFlowFrame,
+                    onDeleteRealtimeFlowFrame = onDeleteRealtimeFlowFrame,
+                    onMoveRealtimeFlowFrameUp = onMoveRealtimeFlowFrameUp,
+                    onMoveRealtimeFlowFrameDown = onMoveRealtimeFlowFrameDown,
+                    onRealtimeFlowFrameDuration = onRealtimeFlowFrameDuration,
+                    onRealtimeFlowLed = onRealtimeFlowLed,
                     onMusicMaxBrightness = onMusicMaxBrightness,
                     onMusicSensitivity = onMusicSensitivity,
                     onMusicPunch = onMusicPunch,
@@ -769,6 +804,13 @@ private fun ControllerPage(
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown,
+                onAddRealtimeFlowFrame = onAddRealtimeFlowFrame,
+                onDuplicateRealtimeFlowFrame = onDuplicateRealtimeFlowFrame,
+                onDeleteRealtimeFlowFrame = onDeleteRealtimeFlowFrame,
+                onMoveRealtimeFlowFrameUp = onMoveRealtimeFlowFrameUp,
+                onMoveRealtimeFlowFrameDown = onMoveRealtimeFlowFrameDown,
+                onRealtimeFlowFrameDuration = onRealtimeFlowFrameDuration,
+                onRealtimeFlowLed = onRealtimeFlowLed,
                 onMusicMaxBrightness = onMusicMaxBrightness,
                 onMusicSensitivity = onMusicSensitivity,
                 onMusicPunch = onMusicPunch,
@@ -815,6 +857,13 @@ private fun ControllerPageList(
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
+    onAddRealtimeFlowFrame: () -> Unit,
+    onDuplicateRealtimeFlowFrame: (Int) -> Unit,
+    onDeleteRealtimeFlowFrame: (Int) -> Unit,
+    onMoveRealtimeFlowFrameUp: (Int) -> Unit,
+    onMoveRealtimeFlowFrameDown: (Int) -> Unit,
+    onRealtimeFlowFrameDuration: (Int, Int) -> Unit,
+    onRealtimeFlowLed: (Int, Int, RealtimeLed) -> Unit,
     onMusicMaxBrightness: (Int) -> Unit,
     onMusicSensitivity: (Int) -> Unit,
     onMusicPunch: (Int) -> Unit,
@@ -863,6 +912,13 @@ private fun ControllerPageList(
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown,
+                onAddRealtimeFlowFrame = onAddRealtimeFlowFrame,
+                onDuplicateRealtimeFlowFrame = onDuplicateRealtimeFlowFrame,
+                onDeleteRealtimeFlowFrame = onDeleteRealtimeFlowFrame,
+                onMoveRealtimeFlowFrameUp = onMoveRealtimeFlowFrameUp,
+                onMoveRealtimeFlowFrameDown = onMoveRealtimeFlowFrameDown,
+                onRealtimeFlowFrameDuration = onRealtimeFlowFrameDuration,
+                onRealtimeFlowLed = onRealtimeFlowLed,
                 musicSettings = state.musicSettings,
                 musicRuntime = state.musicRuntime,
                 microphonePermissionGranted = microphonePermissionGranted,
@@ -1002,21 +1058,26 @@ private fun ControllerTopBar(
     connectionState: BluetoothConnectionState,
     currentMode: ControlMode,
     musicRunning: Boolean,
+    realtimeFlowRunning: Boolean,
     flowFramesValid: Boolean,
     autoSendEnabled: Boolean,
     showAdvancedSendPanel: Boolean,
+    realtimeFlowAddCopiesLast: Boolean,
     previewVisible: Boolean,
     onSendClick: () -> Unit,
     onPreviewClick: () -> Unit,
     onBluetoothClick: () -> Unit,
     onToggleAutoSend: (Boolean) -> Unit,
     onToggleAdvancedSendPanel: (Boolean) -> Unit,
+    onToggleRealtimeFlowAddCopiesLast: (Boolean) -> Unit,
     onResetAllParameters: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     val isMusicMode = currentMode == ControlMode.MusicReactive
-    val sendEnabled = if (isMusicMode) true else flowFramesValid && connectionState == BluetoothConnectionState.Connected
+    val isRealtimeFlowMode = currentMode == ControlMode.CustomRealtimeFlow
+    val isRealtimeRunning = (isMusicMode && musicRunning) || (isRealtimeFlowMode && realtimeFlowRunning)
+    val sendEnabled = if (isMusicMode) true else if (isRealtimeFlowMode) realtimeFlowRunning || connectionState == BluetoothConnectionState.Connected else flowFramesValid && connectionState == BluetoothConnectionState.Connected
 
     if (showResetConfirm) {
         AlertDialog(
@@ -1047,7 +1108,7 @@ private fun ControllerTopBar(
             IconButton(onClick = onSendClick, enabled = sendEnabled) {
                 SendPlaneIcon(
                     modifier = Modifier.size(21.dp),
-                    color = if (isMusicMode && musicRunning) {
+                    color = if (isRealtimeRunning) {
                         MaterialTheme.colorScheme.error
                     } else if (sendEnabled) {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -1102,12 +1163,17 @@ private fun ControllerTopBar(
                     ControllerMenuContent(
                         autoSendEnabled = autoSendEnabled,
                         showAdvancedSendPanel = showAdvancedSendPanel,
+                        realtimeFlowAddCopiesLast = realtimeFlowAddCopiesLast,
                         onToggleAutoSend = {
                             onToggleAutoSend(!autoSendEnabled)
                             menuExpanded = false
                         },
                         onToggleAdvancedSendPanel = {
                             onToggleAdvancedSendPanel(!showAdvancedSendPanel)
+                            menuExpanded = false
+                        },
+                        onToggleRealtimeFlowAddCopiesLast = {
+                            onToggleRealtimeFlowAddCopiesLast(!realtimeFlowAddCopiesLast)
                             menuExpanded = false
                         },
                         onResetAllParameters = {
@@ -1126,8 +1192,10 @@ private fun ControllerTopBar(
 private fun ControllerMenuContent(
     autoSendEnabled: Boolean,
     showAdvancedSendPanel: Boolean,
+    realtimeFlowAddCopiesLast: Boolean,
     onToggleAutoSend: () -> Unit,
     onToggleAdvancedSendPanel: () -> Unit,
+    onToggleRealtimeFlowAddCopiesLast: () -> Unit,
     onResetAllParameters: () -> Unit
 ) {
     CheckableMenuItem(
@@ -1141,6 +1209,12 @@ private fun ControllerMenuContent(
         checked = showAdvancedSendPanel,
         supportingText = "显示当前帧、复制和手动 Hex",
         onClick = onToggleAdvancedSendPanel
+    )
+    CheckableMenuItem(
+        text = "添加时复制最后画面",
+        checked = realtimeFlowAddCopiesLast,
+        supportingText = if (realtimeFlowAddCopiesLast) "自定义流水添加画面会复制最后画面" else "自定义流水添加画面默认为空",
+        onClick = onToggleRealtimeFlowAddCopiesLast
     )
     Divider(
         modifier = Modifier.padding(vertical = 4.dp),
@@ -1225,22 +1299,31 @@ private fun LedPreviewPanel(
 ) {
     val control = state.effectiveControl
     val cleanFrames = RgbControlState.sanitizeFlowFrames(control.flowFrames)
+    val realtimeFlowFrames = remember(control.realtimeFlowFrames) {
+        RgbControlState.sanitizeRealtimeFlowFrames(control.realtimeFlowFrames)
+    }
+    val realtimeFlowDurationMillis = remember(realtimeFlowFrames) {
+        realtimeFlowFrames.sumOf { it.durationTicks.coerceIn(1, 255) * 10 }.coerceAtLeast(10)
+    }
     val animationDurationMillis = when (control.mode) {
         ControlMode.Breath -> (control.breathPeriod.coerceIn(1, 255) * 20).coerceAtLeast(40)
         ControlMode.Flow -> (cleanFrames.size * control.flowInterval.coerceIn(1, 255) * 10).coerceAtLeast(10)
+        ControlMode.CustomRealtimeFlow -> realtimeFlowDurationMillis
         ControlMode.Disco -> 8 * LedPreviewDiscoStepMillis
         ControlMode.Gradient,
         ControlMode.FlowGradient -> (control.gradientPeriod.coerceIn(1, 255) * 50).coerceAtLeast(50)
         else -> LedPreviewDiscoStepMillis
     }
     var progress by remember { mutableStateOf(0f) }
+    var elapsedInCycleMillis by remember { mutableStateOf(0) }
 
-    LaunchedEffect(control.mode, control.flowInterval, control.breathPeriod, control.gradientPeriod, cleanFrames) {
+    LaunchedEffect(control.mode, control.flowInterval, control.breathPeriod, control.gradientPeriod, cleanFrames, realtimeFlowFrames) {
         val startMillis = withFrameMillis { it }
         while (true) {
             val frameMillis = withFrameMillis { it }
             val elapsed = (frameMillis - startMillis).coerceAtLeast(0L)
-            progress = (elapsed % animationDurationMillis).toFloat() / animationDurationMillis
+            elapsedInCycleMillis = (elapsed % animationDurationMillis).toInt()
+            progress = elapsedInCycleMillis.toFloat() / animationDurationMillis
         }
     }
 
@@ -1264,8 +1347,16 @@ private fun LedPreviewPanel(
     val displayMaxBrightness = (control.brightness.coerceIn(0, 255) / 255f).pow(LedPreviewGamma)
     val brightnessFactor = brightnessPhase * displayMaxBrightness
     val baseColor = Color(control.red.coerceIn(0, 255), control.green.coerceIn(0, 255), control.blue.coerceIn(0, 255))
-    val realtimeLeds = remember(state.musicRuntime.level) {
+    val musicRealtimeLeds = remember(state.musicRuntime.level) {
         com.rgbws2812.controller.audio.MusicReactiveMapper.ledsForLevel(state.musicRuntime.level)
+    }
+    val flowRealtimeLeds = remember(realtimeFlowFrames, elapsedInCycleMillis) {
+        realtimeFlowFrameAt(realtimeFlowFrames, elapsedInCycleMillis).leds
+    }
+    val realtimeLeds = when (control.mode) {
+        ControlMode.MusicReactive -> musicRealtimeLeds
+        ControlMode.CustomRealtimeFlow -> flowRealtimeLeds
+        else -> null
     }
     val dividerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
 
@@ -1293,7 +1384,7 @@ private fun LedPreviewPanel(
                     gradientPhase = gradientPhase,
                     mode = control.mode,
                     brightnessFactor = brightnessFactor,
-                    realtimeLeds = if (control.mode == ControlMode.MusicReactive) realtimeLeds else null,
+                    realtimeLeds = realtimeLeds,
                     modifier = Modifier.size(LedPreviewGridWidth, LedPreviewGridHeight)
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1324,7 +1415,7 @@ private fun LedPreviewPanel(
                     gradientPhase = gradientPhase,
                     mode = control.mode,
                     brightnessFactor = brightnessFactor,
-                    realtimeLeds = if (control.mode == ControlMode.MusicReactive) realtimeLeds else null,
+                    realtimeLeds = realtimeLeds,
                     modifier = Modifier.size(LedPreviewGridWidth, LedPreviewGridHeight)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -1425,6 +1516,16 @@ private fun previewLedColor(
     }
 
 private fun gradientPreviewColor(color: RgbColor): Color = Color(color.red, color.green, color.blue)
+
+private fun realtimeFlowFrameAt(frames: List<RealtimeFlowFrame>, elapsedInCycleMillis: Int): RealtimeFlowFrame {
+    var remaining = elapsedInCycleMillis.coerceAtLeast(0)
+    frames.forEach { frame ->
+        val durationMillis = frame.durationTicks.coerceIn(1, 255) * 10
+        if (remaining < durationMillis) return frame
+        remaining -= durationMillis
+    }
+    return frames.last()
+}
 
 @Composable
 private fun BluetoothStatusPanel(
@@ -1689,6 +1790,13 @@ private fun ControlSection(
     onDeleteFlowFrame: (Int) -> Unit,
     onMoveFlowFrameUp: (Int) -> Unit,
     onMoveFlowFrameDown: (Int) -> Unit,
+    onAddRealtimeFlowFrame: () -> Unit,
+    onDuplicateRealtimeFlowFrame: (Int) -> Unit,
+    onDeleteRealtimeFlowFrame: (Int) -> Unit,
+    onMoveRealtimeFlowFrameUp: (Int) -> Unit,
+    onMoveRealtimeFlowFrameDown: (Int) -> Unit,
+    onRealtimeFlowFrameDuration: (Int, Int) -> Unit,
+    onRealtimeFlowLed: (Int, Int, RealtimeLed) -> Unit,
     musicSettings: com.rgbws2812.controller.audio.MusicReactiveSettings,
     musicRuntime: com.rgbws2812.controller.audio.MusicReactiveRuntimeState,
     microphonePermissionGranted: Boolean,
@@ -1754,7 +1862,7 @@ private fun ControlSection(
             )
             return@AppSection
         }
-        if (state.mode != ControlMode.Disco && !state.mode.isGradientFamily) {
+        if (state.mode != ControlMode.Disco && !state.mode.isGradientFamily && state.mode != ControlMode.CustomRealtimeFlow) {
             ColorControls(state = state, onColor = onColor)
             Spacer(modifier = Modifier.height(12.dp))
         }
@@ -1806,6 +1914,18 @@ private fun ControlSection(
                 onDeleteFlowFrame = onDeleteFlowFrame,
                 onMoveFlowFrameUp = onMoveFlowFrameUp,
                 onMoveFlowFrameDown = onMoveFlowFrameDown
+            )
+        }
+        if (state.mode == ControlMode.CustomRealtimeFlow) {
+            RealtimeFlowEditor(
+                frames = state.realtimeFlowFrames,
+                onAddFrame = onAddRealtimeFlowFrame,
+                onDuplicateFrame = onDuplicateRealtimeFlowFrame,
+                onDeleteFrame = onDeleteRealtimeFlowFrame,
+                onMoveFrameUp = onMoveRealtimeFlowFrameUp,
+                onMoveFrameDown = onMoveRealtimeFlowFrameDown,
+                onFrameDuration = onRealtimeFlowFrameDuration,
+                onLed = onRealtimeFlowLed
             )
         }
     }
@@ -2070,10 +2190,6 @@ private fun ColorControls(
             }
         )
     }
-
-    val hsv = rgbToHsv(state.red, state.green, state.blue)
-    val displayHue = if (hsv.saturation == 0f && hsv.value == 0f) 0f else hsv.hue
-    val hueColor = colorForHue(displayHue)
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionSubheading("颜色")
@@ -3169,6 +3285,313 @@ private fun AdvancedFlowFrameEditor(
 }
 
 @Composable
+private fun RealtimeFlowEditor(
+    frames: List<RealtimeFlowFrame>,
+    onAddFrame: () -> Unit,
+    onDuplicateFrame: (Int) -> Unit,
+    onDeleteFrame: (Int) -> Unit,
+    onMoveFrameUp: (Int) -> Unit,
+    onMoveFrameDown: (Int) -> Unit,
+    onFrameDuration: (Int, Int) -> Unit,
+    onLed: (Int, Int, RealtimeLed) -> Unit
+) {
+    val cleanFrames = remember(frames) { RgbControlState.sanitizeRealtimeFlowFrames(frames) }
+    var selectedFrame by rememberSaveable { mutableStateOf(0) }
+    var editingLed by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+
+    LaunchedEffect(cleanFrames.size) {
+        selectedFrame = selectedFrame.coerceIn(0, cleanFrames.lastIndex)
+    }
+
+    editingLed?.let { (frameIndex, ledIndex) ->
+        cleanFrames.getOrNull(frameIndex)?.let { frame ->
+            val led = RealtimeFlowFrame.sanitizeLeds(frame.leds).getOrElse(ledIndex) { RgbControlState.DefaultRealtimeFlowLed }
+            RealtimeLedEditorDialog(
+                ledLabel = "画面 ${frameIndex + 1} / 灯 ${DisplayToHardwareOrder.indexOf(ledIndex) + 1}",
+                led = led,
+                onConfirm = { updated ->
+                    onLed(frameIndex, ledIndex, updated)
+                    editingLed = null
+                },
+                onDismiss = { editingLed = null }
+            )
+        } ?: run {
+            editingLed = null
+        }
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+    SectionSubheading("实时流水画面")
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = "共 ${cleanFrames.size} 个画面，发送时按每个画面的 x10ms 周期循环实时直显。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(10.dp))
+    cleanFrames.forEachIndexed { frameIndex, frame ->
+        RealtimeFlowFrameEditor(
+            frameIndex = frameIndex,
+            frameCount = cleanFrames.size,
+            frame = frame,
+            selected = selectedFrame == frameIndex,
+            onSelectFrame = { selectedFrame = frameIndex },
+            onSelectLed = {
+                selectedFrame = frameIndex
+                editingLed = frameIndex to it
+            },
+            onDuplicateFrame = { onDuplicateFrame(frameIndex) },
+            onDeleteFrame = { onDeleteFrame(frameIndex) },
+            onMoveFrameUp = { onMoveFrameUp(frameIndex) },
+            onMoveFrameDown = { onMoveFrameDown(frameIndex) },
+            onFrameDuration = { onFrameDuration(frameIndex, it) }
+        )
+        if (frameIndex < cleanFrames.lastIndex) {
+            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        OutlinedButton(
+            onClick = {
+                onAddFrame()
+                selectedFrame = cleanFrames.size
+            }
+        ) {
+            AddFrameIcon(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("添加画面")
+        }
+    }
+}
+
+@Composable
+private fun RealtimeFlowFrameEditor(
+    frameIndex: Int,
+    frameCount: Int,
+    frame: RealtimeFlowFrame,
+    selected: Boolean,
+    onSelectFrame: () -> Unit,
+    onSelectLed: (Int) -> Unit,
+    onDuplicateFrame: () -> Unit,
+    onDeleteFrame: () -> Unit,
+    onMoveFrameUp: () -> Unit,
+    onMoveFrameDown: () -> Unit,
+    onFrameDuration: (Int) -> Unit,
+) {
+    val leds = remember(frame.leds) { RealtimeFlowFrame.sanitizeLeds(frame.leds) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp)
+            .clickable { onSelectFrame() },
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "画面 ${frameIndex + 1}",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    enabled = frameIndex > 0,
+                    onClick = onMoveFrameUp
+                ) {
+                    MoveFrameIcon(up = true, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(
+                    enabled = frameIndex < frameCount - 1,
+                    onClick = onMoveFrameDown
+                ) {
+                    MoveFrameIcon(up = false, modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(onClick = onDuplicateFrame) {
+                    AddFrameIcon(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(
+                    enabled = frameCount > 1,
+                    onClick = onDeleteFrame
+                ) {
+                    DeleteFrameIcon(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+        NumberSlider(
+            label = "持续周期 x10ms",
+            value = frame.durationTicks.coerceIn(1, 255),
+            range = 1..255,
+            valueHint = durationSecondsText(frame.durationTicks.coerceIn(1, 255) * 10),
+            onValue = onFrameDuration
+        )
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = FlowEditorGridMaxWidth)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DisplayToHardwareOrder.chunked(4).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        row.forEach { led ->
+                            val value = leds.getOrElse(led) { RgbControlState.DefaultRealtimeFlowLed }
+                            val color = Color(value.red.coerceIn(0, 255), value.green.coerceIn(0, 255), value.blue.coerceIn(0, 255))
+                            val level = value.level.coerceIn(0, 255) / 255f
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp)
+                                    .clickable { onSelectLed(led) },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+                                ),
+                                color = if (value.level > 0) color.copy(alpha = (0.18f + 0.62f * level).coerceIn(0f, 0.8f)) else MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        (DisplayToHardwareOrder.indexOf(led) + 1).toString(),
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (value.level > 0) checkMarkColor(value.red, value.green, value.blue) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RealtimeLedEditorDialog(
+    ledLabel: String,
+    led: RealtimeLed,
+    onConfirm: (RealtimeLed) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var draft by remember(led) { mutableStateOf(led.clamped()) }
+    var colorDialogVisible by remember { mutableStateOf(false) }
+    var colorDraft by remember(draft.red, draft.green, draft.blue) { mutableStateOf(Triple(draft.red, draft.green, draft.blue)) }
+    val customSelected = !isBasicPaletteColor(draft.red, draft.green, draft.blue)
+
+    if (colorDialogVisible) {
+        CustomColorDialog(
+            color = Triple(draft.red, draft.green, draft.blue),
+            draftColor = colorDraft,
+            onDraftColorChange = { red, green, blue -> colorDraft = Triple(red, green, blue) },
+            onDraftColorReset = { colorDraft = Triple(draft.red, draft.green, draft.blue) },
+            onConfirm = { red, green, blue ->
+                draft = draft.copy(red = red, green = green, blue = blue, level = draft.level.coerceAtLeast(128))
+                colorDialogVisible = false
+            },
+            onDismiss = { colorDialogVisible = false }
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .widthIn(max = 520.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(ledLabel, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "选择颜色并调整这颗灯的亮度。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                    BasicColors.forEach { color ->
+                        BasicPaletteItem(
+                            color = color,
+                            selected = !customSelected && draft.red == color.red && draft.green == color.green && draft.blue == color.blue,
+                            onClick = {
+                                draft = draft.copy(
+                                    red = color.red,
+                                    green = color.green,
+                                    blue = color.blue,
+                                    level = draft.level.coerceAtLeast(128)
+                                )
+                            }
+                        )
+                    }
+                    CustomPaletteItem(
+                        selected = customSelected,
+                        color = Color(draft.red, draft.green, draft.blue),
+                        checkColor = checkMarkColor(draft.red, draft.green, draft.blue),
+                        onClick = {
+                            colorDraft = Triple(draft.red, draft.green, draft.blue)
+                            colorDialogVisible = true
+                        }
+                    )
+                }
+                CompactRgbSlider(
+                    label = "R",
+                    value = draft.red,
+                    onValue = { draft = draft.copy(red = it) }
+                )
+                CompactRgbSlider(
+                    label = "G",
+                    value = draft.green,
+                    onValue = { draft = draft.copy(green = it) }
+                )
+                CompactRgbSlider(
+                    label = "B",
+                    value = draft.blue,
+                    onValue = { draft = draft.copy(blue = it) }
+                )
+                InlineNumberSlider(
+                    label = "亮度",
+                    value = draft.level,
+                    range = 0..255,
+                    onValue = { draft = draft.copy(level = it) }
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { draft = draft.copy(level = 0) }) { Text("熄灭") }
+                    OutlinedButton(onClick = { draft = draft.copy(level = 255) }) { Text("全亮") }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onConfirm(draft.clamped()) }) { Text("确定") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun FrameSection(
     state: MainUiState,
     onSend: () -> Unit,
@@ -3177,7 +3600,51 @@ private fun FrameSection(
     onSendManual: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
+    val realtimePreviewFrame = remember(state.control.realtimeFlowFrames, state.control.brightness) {
+        val flowFrame = RgbControlState.sanitizeRealtimeFlowFrames(state.control.realtimeFlowFrames).first()
+        RealtimeFrameBuilder.build(
+            leds = flowFrame.leds,
+            maxBrightness = state.control.brightness,
+            sequence = 0
+        )
+    }
     AppSection(title = "帧与发送") {
+        if (state.control.mode == ControlMode.CustomRealtimeFlow) {
+            SectionSubheading("实时直显帧预览 ${realtimePreviewFrame.bytes.size} 字节")
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                color = frameCodeBlockColor()
+            ) {
+                Text(
+                    text = realtimePreviewFrame.spacedHex(),
+                    modifier = Modifier.padding(14.dp),
+                    color = frameCodeTextColor(),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (state.realtimeFlowRunning) state.realtimeFlowStatus else "发送按钮用于开始或停止循环播放",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    enabled = state.bluetooth.connectionState == BluetoothConnectionState.Connected || state.realtimeFlowRunning,
+                    onClick = onSend
+                ) { Text(if (state.realtimeFlowRunning) "停止播放" else "开始播放") }
+                OutlinedButton(
+                    onClick = { clipboard.setText(AnnotatedString(realtimePreviewFrame.spacedHex())) }
+                ) { Text("复制 Hex") }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            ByteTable(frameHex = realtimePreviewFrame.spacedHex())
+            return@AppSection
+        }
+
         SectionSubheading("当前 ${state.frame.bytes.size} 字节帧")
         Surface(
             modifier = Modifier.fillMaxWidth(),

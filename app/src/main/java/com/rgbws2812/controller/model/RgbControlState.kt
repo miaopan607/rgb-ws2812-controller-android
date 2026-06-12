@@ -1,5 +1,26 @@
 package com.rgbws2812.controller.model
 
+import com.rgbws2812.controller.protocol.RealtimeFrameBuilder
+import com.rgbws2812.controller.protocol.RealtimeLed
+
+data class RealtimeFlowFrame(
+    val durationTicks: Int = RgbControlState.DefaultRealtimeFlowDurationTicks,
+    val leds: List<RealtimeLed> = RgbControlState.DefaultRealtimeFlowLeds
+) {
+    fun clamped(): RealtimeFlowFrame =
+        copy(
+            durationTicks = durationTicks.coerceIn(1, 255),
+            leds = sanitizeLeds(leds)
+        )
+
+    companion object {
+        fun sanitizeLeds(leds: List<RealtimeLed>): List<RealtimeLed> {
+            val clean = leds.take(RealtimeFrameBuilder.LedCount).map { it.clamped() }
+            return clean + List(RealtimeFrameBuilder.LedCount - clean.size) { RgbControlState.DefaultRealtimeFlowLed }
+        }
+    }
+}
+
 data class RgbControlState(
     val mode: ControlMode = ControlMode.Flow,
     val red: Int = 0,
@@ -10,7 +31,8 @@ data class RgbControlState(
     val breathPeriod: Int = DefaultBreathPeriod,
     val gradientPeriod: Int = DefaultGradientPeriod,
     val order: List<Int> = DefaultOrder,
-    val flowFrames: List<Int> = DefaultFlowFrames
+    val flowFrames: List<Int> = DefaultFlowFrames,
+    val realtimeFlowFrames: List<RealtimeFlowFrame> = DefaultRealtimeFlowFrames
 ) {
     val rgbHex: String
         get() = "#%02X%02X%02X".format(red.coerceIn(0, 255), green.coerceIn(0, 255), blue.coerceIn(0, 255))
@@ -24,7 +46,8 @@ data class RgbControlState(
         breathPeriod = breathPeriod.coerceIn(1, 255),
         gradientPeriod = gradientPeriod.coerceIn(1, 255),
         order = order.filter { it in 0..7 }.distinct().take(MaxFlowFrames),
-        flowFrames = sanitizeFlowFrames(flowFrames)
+        flowFrames = sanitizeFlowFrames(flowFrames),
+        realtimeFlowFrames = sanitizeRealtimeFlowFrames(realtimeFlowFrames)
     )
 
     fun activePeriodForMode(): Int =
@@ -33,6 +56,7 @@ data class RgbControlState(
             ControlMode.Breath -> breathPeriod
             ControlMode.Gradient,
             ControlMode.FlowGradient -> gradientPeriod
+            ControlMode.CustomRealtimeFlow -> DefaultRealtimeFlowDurationTicks
             else -> DefaultUnusedPeriod
         }
 
@@ -42,9 +66,13 @@ data class RgbControlState(
         const val DefaultBreathPeriod = 100
         const val DefaultGradientPeriod = 20
         const val DefaultUnusedPeriod = 20
+        const val DefaultRealtimeFlowDurationTicks = 25
         val EmptyFlowFrames = listOf(0)
         val DefaultOrder = listOf(3, 2, 1, 0, 4, 5, 6, 7)
         val DefaultFlowFrames = EmptyFlowFrames
+        val DefaultRealtimeFlowLed = RealtimeLed(red = 0, green = 0, blue = 0, level = 0)
+        val DefaultRealtimeFlowLeds = List(RealtimeFrameBuilder.LedCount) { DefaultRealtimeFlowLed }
+        val DefaultRealtimeFlowFrames = listOf(RealtimeFlowFrame())
         val Default = RgbControlState()
 
         fun orderToFlowFrames(order: List<Int>): List<Int> =
@@ -58,5 +86,9 @@ data class RgbControlState(
             frames.take(MaxFlowFrames)
                 .map { it.coerceIn(0, 255) }
                 .ifEmpty { EmptyFlowFrames }
+
+        fun sanitizeRealtimeFlowFrames(frames: List<RealtimeFlowFrame>): List<RealtimeFlowFrame> =
+            frames.map { it.clamped() }
+                .ifEmpty { DefaultRealtimeFlowFrames }
     }
 }

@@ -21,6 +21,7 @@ import com.rgbws2812.controller.model.BluetoothUiState
 import com.rgbws2812.controller.model.ControlMode
 import com.rgbws2812.controller.model.DeviceInfo
 import com.rgbws2812.controller.model.Preset
+import com.rgbws2812.controller.model.RealtimeFlowFrame
 import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.SendHistoryItem
 import com.rgbws2812.controller.model.SerialParity
@@ -29,6 +30,7 @@ import com.rgbws2812.controller.protocol.RgbFrame
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
 import com.rgbws2812.controller.protocol.RealtimeFrame
 import com.rgbws2812.controller.protocol.RealtimeFrameBuilder
+import com.rgbws2812.controller.protocol.RealtimeLed
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,12 +53,16 @@ data class MainUiState(
     val autoSendEnabled: Boolean = false,
     val showAdvancedSendPanel: Boolean = false,
     val useAdvancedFlowEditor: Boolean = false,
+    val realtimeFlowAddCopiesLast: Boolean = false,
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList(),
     val bluetooth: BluetoothUiState = BluetoothUiState(),
     val musicSettings: MusicReactiveSettings = MusicReactiveSettings(),
     val serialConfig: SerialPortConfig = SerialPortConfig(),
     val musicRuntime: MusicReactiveRuntimeState = MusicReactiveRuntimeState(),
+    val realtimeFlowRunning: Boolean = false,
+    val realtimeFlowSentFps: Int = 0,
+    val realtimeFlowStatus: String = "自定义流水未启动",
     val manualHex: String = "",
     val importExportText: String = "",
     val statusMessage: String? = null,
@@ -73,7 +79,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var currentMusicSettings = MusicReactiveSettings()
     private var autoSendJob: Job? = null
     private var realtimeSendJob: Job? = null
+    private var customRealtimeFlowJob: Job? = null
     private var realtimeSendInFlight = false
+    private var customRealtimeFlowInFlight = false
     private var realtimeSequence = 0
 
     init {
@@ -112,12 +120,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 autoSendEnabled = storageState.autoSendEnabled,
                 showAdvancedSendPanel = storageState.showAdvancedSendPanel,
                 useAdvancedFlowEditor = storageState.useAdvancedFlowEditor,
+                realtimeFlowAddCopiesLast = storageState.realtimeFlowAddCopiesLast,
                 presets = storageState.presets,
                 history = storageState.history,
                 bluetooth = bluetoothState,
                 musicSettings = storageState.musicSettings,
                 serialConfig = manual.serialConfig,
                 musicRuntime = musicRuntime,
+                realtimeFlowRunning = manual.realtimeFlowRunning,
+                realtimeFlowSentFps = manual.realtimeFlowSentFps,
+                realtimeFlowStatus = manual.realtimeFlowStatus,
                 manualHex = manual.manualHex,
                 importExportText = manual.importExportText,
                 statusMessage = manual.statusMessage,
@@ -190,6 +202,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateMode(mode: ControlMode) {
         if (mode != ControlMode.MusicReactive) stopMusicReactive()
+        if (mode != ControlMode.CustomRealtimeFlow) stopCustomRealtimeFlow()
         updateControl { it.copy(mode = mode) }
     }
 
@@ -207,6 +220,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ControlMode.Breath -> current.copy(breathPeriod = cleanValue)
                 ControlMode.Gradient,
                 ControlMode.FlowGradient -> current.copy(gradientPeriod = cleanValue)
+                ControlMode.CustomRealtimeFlow -> {
+                    val frames = current.realtimeFlowFrames.toMutableList()
+                    if (frames.isNotEmpty()) {
+                        frames[0] = frames[0].copy(durationTicks = cleanValue)
+                    }
+                    current.copy(realtimeFlowFrames = frames)
+                }
                 else -> current
             }
         }
@@ -302,6 +322,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateControl { it.copy(flowFrames = RgbControlState.sanitizeFlowFrames(frames)) }
     }
 
+    fun addRealtimeFlowFrame() {
+        updateRealtimeFlowFrames { frames ->
+            val newFrame = if (uiState.value.realtimeFlowAddCopiesLast) frames.lastOrNull() ?: RealtimeFlowFrame() else RealtimeFlowFrame()
+            frames.add(newFrame)
+        }
+    }
+
+    fun duplicateRealtimeFlowFrame(index: Int) {
+        updateRealtimeFlowFrames { frames ->
+            if (index in frames.indices) {
+                frames.add(index + 1, frames[index])
+            }
+        }
+    }
+
+    fun deleteRealtimeFlowFrame(index: Int) {
+        updateRealtimeFlowFrames { frames ->
+            if (frames.size > 1 && index in frames.indices) {
+                frames.removeAt(index)
+            }
+        }
+    }
+
+    fun moveRealtimeFlowFrameUp(index: Int) {
+        updateRealtimeFlowFrames { frames ->
+            if (index in 1..frames.lastIndex) {
+                frames.swap(index, index - 1)
+            }
+        }
+    }
+
+    fun moveRealtimeFlowFrameDown(index: Int) {
+        updateRealtimeFlowFrames { frames ->
+            if (index in 0 until frames.lastIndex) {
+                frames.swap(index, index + 1)
+            }
+        }
+    }
+
+    fun setRealtimeFlowFrameDuration(index: Int, durationTicks: Int) {
+        updateRealtimeFlowFrame(index) { it.copy(durationTicks = durationTicks.coerceIn(1, 255)) }
+    }
+
+    fun updateRealtimeFlowLed(frameIndex: Int, ledIndex: Int, led: RealtimeLed) {
+        if (ledIndex !in 0 until RealtimeFrameBuilder.LedCount) return
+        updateRealtimeFlowFrame(frameIndex) { frame ->
+            val leds = RealtimeFlowFrame.sanitizeLeds(frame.leds).toMutableList()
+            leds[ledIndex] = led.clamped()
+            frame.copy(leds = leds)
+        }
+    }
+
     fun setAutoSend(enabled: Boolean) {
         viewModelScope.launch {
             storage.saveAutoSend(enabled)
@@ -324,6 +396,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setRealtimeFlowAddCopiesLast(enabled: Boolean) {
+        viewModelScope.launch {
+            storage.saveRealtimeFlowAddCopiesLast(enabled)
+            manualState.update { it.copy(statusMessage = if (enabled) "添加画面将复制最后画面" else "添加画面将使用空画面") }
+        }
+    }
+
     fun sendCurrent() {
         viewModelScope.launch {
             val state = uiState.value
@@ -332,6 +411,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     stopMusicReactive()
                 } else {
                     startMusicReactive()
+                }
+                return@launch
+            }
+            if (state.control.mode == ControlMode.CustomRealtimeFlow) {
+                if (state.realtimeFlowRunning) {
+                    stopCustomRealtimeFlow()
+                } else {
+                    startCustomRealtimeFlow()
                 }
                 return@launch
             }
@@ -448,6 +535,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 sentFps = 0,
                 sentThisSecond = 0,
                 status = "音乐律动已停止"
+            )
+        }
+    }
+
+    fun stopCustomRealtimeFlow() {
+        customRealtimeFlowJob?.cancel()
+        customRealtimeFlowJob = null
+        customRealtimeFlowInFlight = false
+        manualState.update {
+            it.copy(
+                realtimeFlowRunning = false,
+                realtimeFlowSentFps = 0,
+                realtimeFlowSentThisSecond = 0,
+                realtimeFlowStatus = "自定义流水已停止"
             )
         }
     }
@@ -570,6 +671,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         stopMusicReactive()
         audioCapture.release()
+        stopCustomRealtimeFlow()
         bluetoothClient.release()
         super.onCleared()
     }
@@ -588,6 +690,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!state.autoSendEnabled ||
             !state.flowFramesValid ||
             state.control.mode == ControlMode.MusicReactive ||
+            state.control.mode == ControlMode.CustomRealtimeFlow ||
             state.bluetooth.connectionState != BluetoothConnectionState.Connected
         ) {
             return
@@ -644,6 +747,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 delay((1_000L / settings.targetFps.coerceIn(1, 25)).coerceAtLeast(40L))
             }
+        }
+    }
+
+    private fun startCustomRealtimeFlow() {
+        val state = uiState.value
+        if (state.bluetooth.connectionState != BluetoothConnectionState.Connected) {
+            manualState.update { it.copy(errorMessage = "请先连接蓝牙设备") }
+            return
+        }
+        customRealtimeFlowJob?.cancel()
+        customRealtimeFlowInFlight = false
+        manualState.update {
+            it.copy(
+                realtimeFlowRunning = true,
+                realtimeFlowSentFps = 0,
+                realtimeFlowSentThisSecond = 0,
+                realtimeFlowFpsWindowStartedAt = System.currentTimeMillis(),
+                realtimeFlowStatus = "自定义流水运行中",
+                errorMessage = null
+            )
+        }
+        customRealtimeFlowJob = viewModelScope.launch {
+            var frameIndex = 0
+            while (true) {
+                val currentState = uiState.value
+                if (!manualState.value.realtimeFlowRunning || currentState.control.mode != ControlMode.CustomRealtimeFlow) {
+                    return@launch
+                }
+                val frames = RgbControlState.sanitizeRealtimeFlowFrames(currentState.control.realtimeFlowFrames)
+                if (frameIndex !in frames.indices) frameIndex = 0
+                val flowFrame = frames[frameIndex]
+                if (!customRealtimeFlowInFlight) {
+                    customRealtimeFlowInFlight = true
+                    val frame = RealtimeFrameBuilder.build(
+                        leds = flowFrame.leds,
+                        maxBrightness = currentState.control.brightness,
+                        sequence = realtimeSequence++
+                    )
+                    sendCustomRealtimeFlowFrame(frame)
+                    customRealtimeFlowInFlight = false
+                }
+                delay(flowFrame.durationTicks.coerceIn(1, 255) * 10L)
+                frameIndex = (frameIndex + 1) % frames.size
+            }
+        }
+    }
+
+    private suspend fun sendCustomRealtimeFlowFrame(frame: RealtimeFrame) {
+        val result = bluetoothClient.send(frame.bytes)
+        result.onSuccess {
+            manualState.update { current ->
+                val now = System.currentTimeMillis()
+                val elapsed = now - current.realtimeFlowFpsWindowStartedAt
+                if (elapsed >= 1_000L) {
+                    val sentFps = current.realtimeFlowSentThisSecond + 1
+                    current.copy(
+                        realtimeFlowSentFps = sentFps,
+                        realtimeFlowSentThisSecond = 1,
+                        realtimeFlowFpsWindowStartedAt = now,
+                        realtimeFlowStatus = "自定义流水运行中：$sentFps FPS",
+                        errorMessage = null
+                    )
+                } else {
+                    current.copy(
+                        realtimeFlowSentThisSecond = current.realtimeFlowSentThisSecond + 1,
+                        errorMessage = null
+                    )
+                }
+            }
+        }.onFailure { throwable ->
+            stopCustomRealtimeFlow()
+            manualState.update { it.copy(errorMessage = throwable.message ?: "实时流水发送失败") }
         }
     }
 
@@ -706,6 +881,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         storage.saveHistory((listOf(item) + state.history).take(AppStorage.MaxHistoryItems))
     }
 
+    private fun updateRealtimeFlowFrame(index: Int, transform: (RealtimeFlowFrame) -> RealtimeFlowFrame) {
+        updateRealtimeFlowFrames { frames ->
+            if (index !in frames.indices) {
+                return@updateRealtimeFlowFrames
+            }
+            frames[index] = transform(frames[index]).clamped()
+        }
+    }
+
+    private fun updateRealtimeFlowFrames(transform: (MutableList<RealtimeFlowFrame>) -> Unit) {
+        updateControl { current ->
+            val frames = RgbControlState.sanitizeRealtimeFlowFrames(current.realtimeFlowFrames).toMutableList()
+            transform(frames)
+            current.copy(realtimeFlowFrames = frames)
+        }
+    }
+
+    private fun <T> MutableList<T>.swap(firstIndex: Int, secondIndex: Int) {
+        val first = this[firstIndex]
+        this[firstIndex] = this[secondIndex]
+        this[secondIndex] = first
+    }
+
     private fun effectiveControl(storageState: AppStorageState): RgbControlState {
         val control = storageState.control
         val effectiveFrames = if (storageState.useAdvancedFlowEditor) {
@@ -720,6 +918,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val manualHex: String = "",
         val importExportText: String = "",
         val serialConfig: SerialPortConfig = SerialPortConfig(),
+        val realtimeFlowRunning: Boolean = false,
+        val realtimeFlowSentFps: Int = 0,
+        val realtimeFlowSentThisSecond: Int = 0,
+        val realtimeFlowFpsWindowStartedAt: Long = System.currentTimeMillis(),
+        val realtimeFlowStatus: String = "自定义流水未启动",
         val statusMessage: String? = null,
         val errorMessage: String? = null
     )

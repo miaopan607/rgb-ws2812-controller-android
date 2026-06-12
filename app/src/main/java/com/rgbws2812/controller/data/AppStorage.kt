@@ -11,8 +11,11 @@ import com.rgbws2812.controller.audio.MusicReactiveSettings
 import com.rgbws2812.controller.model.AppStorageState
 import com.rgbws2812.controller.model.ControlMode
 import com.rgbws2812.controller.model.Preset
+import com.rgbws2812.controller.model.RealtimeFlowFrame
 import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.SendHistoryItem
+import com.rgbws2812.controller.protocol.RealtimeFrameBuilder
+import com.rgbws2812.controller.protocol.RealtimeLed
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -37,6 +40,7 @@ class AppStorage(
                 autoSendEnabled = preferences[AutoSendKey] ?: false,
                 showAdvancedSendPanel = preferences[ShowAdvancedSendPanelKey] ?: false,
                 useAdvancedFlowEditor = preferences[UseAdvancedFlowEditorKey] ?: false,
+                realtimeFlowAddCopiesLast = preferences[RealtimeFlowAddCopiesLastKey] ?: false,
                 musicSettings = preferences[MusicSettingsKey]?.let { decodeMusicSettings(it) } ?: MusicReactiveSettings(),
                 presets = preferences[PresetsKey]?.let { decodePresets(it) } ?: emptyList(),
                 history = preferences[HistoryKey]?.let { decodeHistory(it) } ?: emptyList()
@@ -64,6 +68,12 @@ class AppStorage(
     suspend fun saveUseAdvancedFlowEditor(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[UseAdvancedFlowEditorKey] = enabled
+        }
+    }
+
+    suspend fun saveRealtimeFlowAddCopiesLast(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[RealtimeFlowAddCopiesLastKey] = enabled
         }
     }
 
@@ -111,6 +121,7 @@ class AppStorage(
         private val AutoSendKey = booleanPreferencesKey("auto_send")
         private val ShowAdvancedSendPanelKey = booleanPreferencesKey("show_advanced_send_panel")
         private val UseAdvancedFlowEditorKey = booleanPreferencesKey("use_advanced_flow_editor")
+        private val RealtimeFlowAddCopiesLastKey = booleanPreferencesKey("realtime_flow_add_copies_last")
         private val MusicSettingsKey = stringPreferencesKey("music_settings")
         private val PresetsKey = stringPreferencesKey("presets")
         private val HistoryKey = stringPreferencesKey("history")
@@ -152,6 +163,7 @@ class AppStorage(
                 .put("gradientPeriod", control.gradientPeriod.coerceIn(1, 255))
                 .put("order", JSONArray(control.order))
                 .put("flowFrames", JSONArray(control.flowFrames.map { it.coerceIn(0, 255) }))
+                .put("realtimeFlowFrames", realtimeFlowFramesToJson(control.realtimeFlowFrames))
 
         private fun jsonToControl(json: JSONObject): RgbControlState {
             val orderJson = json.optJSONArray("order")
@@ -166,6 +178,12 @@ class AppStorage(
             } else {
                 List(flowFramesJson.length()) { index -> flowFramesJson.optInt(index, 0) }
             }
+            val realtimeFlowFramesJson = json.optJSONArray("realtimeFlowFrames")
+            val realtimeFlowFrames = if (realtimeFlowFramesJson == null) {
+                RgbControlState.DefaultRealtimeFlowFrames
+            } else {
+                jsonToRealtimeFlowFrames(realtimeFlowFramesJson)
+            }
             return restoreControlState(
                 modeValue = json.optInt("mode", ControlMode.Flow.wireValue),
                 red = json.optInt("red", 0),
@@ -177,7 +195,8 @@ class AppStorage(
                 gradientPeriod = json.optInt("gradientPeriod", Int.MIN_VALUE),
                 legacyPeriod = json.optInt("period", Int.MIN_VALUE),
                 order = order,
-                flowFrames = flowFrames
+                flowFrames = flowFrames,
+                realtimeFlowFrames = realtimeFlowFrames
             )
         }
 
@@ -193,7 +212,8 @@ class AppStorage(
             gradientPeriod: Int,
             legacyPeriod: Int,
             order: List<Int>,
-            flowFrames: List<Int>
+            flowFrames: List<Int>,
+            realtimeFlowFrames: List<RealtimeFlowFrame> = RgbControlState.DefaultRealtimeFlowFrames
         ): RgbControlState {
             val legacyFallback = legacyPeriod.takeIf { it != Int.MIN_VALUE }
             return RgbControlState(
@@ -212,9 +232,60 @@ class AppStorage(
                     ?: legacyFallback
                     ?: RgbControlState.DefaultGradientPeriod,
                 order = order,
-                flowFrames = flowFrames
+                flowFrames = flowFrames,
+                realtimeFlowFrames = realtimeFlowFrames
             ).clamped()
         }
+
+        private fun realtimeFlowFramesToJson(frames: List<RealtimeFlowFrame>): JSONArray =
+            JSONArray().also { array ->
+                RgbControlState.sanitizeRealtimeFlowFrames(frames).forEach { frame ->
+                    array.put(
+                        JSONObject()
+                            .put("durationTicks", frame.durationTicks.coerceIn(1, 255))
+                            .put("leds", realtimeLedsToJson(frame.leds))
+                    )
+                }
+            }
+
+        private fun realtimeLedsToJson(leds: List<RealtimeLed>): JSONArray =
+            JSONArray().also { array ->
+                RealtimeFlowFrame.sanitizeLeds(leds).forEach { led ->
+                    array.put(
+                        JSONObject()
+                            .put("red", led.red.coerceIn(0, 255))
+                            .put("green", led.green.coerceIn(0, 255))
+                            .put("blue", led.blue.coerceIn(0, 255))
+                            .put("level", led.level.coerceIn(0, 255))
+                    )
+                }
+            }
+
+        private fun jsonToRealtimeFlowFrames(array: JSONArray): List<RealtimeFlowFrame> =
+            RgbControlState.sanitizeRealtimeFlowFrames(
+                List(array.length()) { index -> array.optJSONObject(index) }
+                    .mapNotNull { json ->
+                        json?.let {
+                            RealtimeFlowFrame(
+                                durationTicks = it.optInt("durationTicks", RgbControlState.DefaultRealtimeFlowDurationTicks),
+                                leds = jsonToRealtimeLeds(it.optJSONArray("leds") ?: JSONArray())
+                            )
+                        }
+                    }
+            )
+
+        private fun jsonToRealtimeLeds(array: JSONArray): List<RealtimeLed> =
+            RealtimeFlowFrame.sanitizeLeds(
+                List(array.length().coerceAtMost(RealtimeFrameBuilder.LedCount)) { index ->
+                    val json = array.optJSONObject(index)
+                    RealtimeLed(
+                        red = json?.optInt("red", 0) ?: 0,
+                        green = json?.optInt("green", 0) ?: 0,
+                        blue = json?.optInt("blue", 0) ?: 0,
+                        level = json?.optInt("level", 0) ?: 0
+                    )
+                }
+            )
 
         private fun presetsToJson(presets: List<Preset>): JSONArray =
             JSONArray().also { array ->

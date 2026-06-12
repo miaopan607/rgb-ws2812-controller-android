@@ -85,6 +85,7 @@ data class AppStorageState(
     val autoSendEnabled: Boolean = false,
     val showAdvancedSendPanel: Boolean = false,
     val useAdvancedFlowEditor: Boolean = false,
+    val realtimeFlowAddCopiesLast: Boolean = false,
     val musicSettings: MusicReactiveSettings = MusicReactiveSettings(),
     val presets: List<Preset> = emptyList(),
     val history: List<SendHistoryItem> = emptyList()

@@ -14,11 +14,13 @@ import android.bluetooth.BluetoothSocket
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.rgbws2812.controller.model.BluetoothConnectionState
@@ -263,7 +265,7 @@ class BluetoothSppClient(
 
     fun stopDiscovery() {
         stopBleScan()
-        adapter?.takeIf { it.isDiscovering }?.cancelDiscovery()
+        stopClassicDiscovery()
         classicDiscoveryActive = false
         _state.update { it.copy(isScanning = false) }
     }
@@ -460,10 +462,24 @@ class BluetoothSppClient(
     }
 
     @SuppressLint("MissingPermission")
+    private fun stopClassicDiscovery() {
+        val bluetoothAdapter = adapter ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(appContext, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        runCatching {
+            if (bluetoothAdapter.isDiscovering) {
+                bluetoothAdapter.cancelDiscovery()
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     private fun stopBleScan() {
-        val scanner = adapter?.bluetoothLeScanner ?: return
         if (bleScanning) {
-            runCatching { scanner.stopScan(bleScanCallback) }
+            runCatching { adapter?.bluetoothLeScanner?.stopScan(bleScanCallback) }
             bleScanning = false
         }
     }
