@@ -79,6 +79,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -126,6 +127,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rgbws2812.controller.model.BluetoothConnectionState
+import com.rgbws2812.controller.model.BluetoothTransport
 import com.rgbws2812.controller.model.ControlMode
 import com.rgbws2812.controller.model.DeviceInfo
 import com.rgbws2812.controller.model.GradientPattern
@@ -133,6 +135,8 @@ import com.rgbws2812.controller.model.Preset
 import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.RgbColor
 import com.rgbws2812.controller.model.SendHistoryItem
+import com.rgbws2812.controller.model.SerialParity
+import com.rgbws2812.controller.audio.MusicReactiveSettings
 import com.rgbws2812.controller.audio.MediaProjectionPermission
 import com.rgbws2812.controller.audio.MusicReactiveDetectionMode
 import com.rgbws2812.controller.audio.MusicReactiveAudioSource
@@ -564,7 +568,13 @@ private fun BluetoothContent(
             navigateBackToController()
         },
         onDisconnect = { viewModel.disconnect() },
-        onRequestPermission = { permissionLauncher.launch(permissions) }
+        onRequestPermission = { permissionLauncher.launch(permissions) },
+        serialConfig = viewModel.uiState.value.serialConfig,
+        onSerialBaudRate = { viewModel.setSerialBaudRate(it) },
+        onSerialDataBits = { viewModel.setSerialDataBits(it) },
+        onSerialStopBits = { viewModel.setSerialStopBits(it) },
+        onSerialParity = { viewModel.setSerialParity(it) },
+        onApplySerialConfig = { viewModel.applySerialConfig() }
     )
 }
 
@@ -907,7 +917,13 @@ private fun BluetoothConnectionPage(
     onStopScan: () -> Unit,
     onConnect: (DeviceInfo) -> Unit,
     onDisconnect: () -> Unit,
-    onRequestPermission: () -> Unit
+    onRequestPermission: () -> Unit,
+    serialConfig: com.rgbws2812.controller.model.SerialPortConfig,
+    onSerialBaudRate: (Int) -> Unit,
+    onSerialDataBits: (Int) -> Unit,
+    onSerialStopBits: (Int) -> Unit,
+    onSerialParity: (SerialParity) -> Unit,
+    onApplySerialConfig: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -932,6 +948,17 @@ private fun BluetoothConnectionPage(
                 permissionsGranted = permissionsGranted,
                 onRequestPermission = onRequestPermission,
                 onDisconnect = onDisconnect
+            )
+        }
+        item {
+            SerialPortConfigPanel(
+                config = serialConfig,
+                connected = state.connectionState == BluetoothConnectionState.Connected,
+                onBaudRate = onSerialBaudRate,
+                onDataBits = onSerialDataBits,
+                onStopBits = onSerialStopBits,
+                onParity = onSerialParity,
+                onApply = onApplySerialConfig
             )
         }
         item {
@@ -1443,6 +1470,79 @@ private fun BluetoothStatusPanel(
 }
 
 @Composable
+private fun SerialPortConfigPanel(
+    config: com.rgbws2812.controller.model.SerialPortConfig,
+    connected: Boolean,
+    onBaudRate: (Int) -> Unit,
+    onDataBits: (Int) -> Unit,
+    onStopBits: (Int) -> Unit,
+    onParity: (SerialParity) -> Unit,
+    onApply: () -> Unit
+) {
+    AppSection(title = "串口参数") {
+        SectionSubheading("波特率")
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(9600, 19200, 38400, 57600, 115200).forEach { baudRate ->
+                FilterChip(
+                    selected = config.baudRate == baudRate,
+                    onClick = { onBaudRate(baudRate) },
+                    label = { Text(baudRate.toString()) }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        SectionSubheading("数据位")
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(8, 9).forEach { dataBits ->
+                FilterChip(
+                    selected = config.dataBits == dataBits,
+                    onClick = { onDataBits(dataBits) },
+                    label = { Text("${dataBits} 位") }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        SectionSubheading("停止位")
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(1, 2).forEach { stopBits ->
+                FilterChip(
+                    selected = config.stopBits == stopBits,
+                    onClick = { onStopBits(stopBits) },
+                    label = { Text("${stopBits} 位") }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        SectionSubheading("校验")
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SerialParity.entries.forEach { parity ->
+                FilterChip(
+                    selected = config.parity == parity,
+                    onClick = { onParity(parity) },
+                    label = { Text(parity.title) }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = onApply, enabled = connected) {
+                Text("应用到 CH9143")
+            }
+            Text(
+                "AT+UART=${config.baudRate},${config.dataBits},${config.stopBits},${config.parity.wireValue},${config.timeoutMs}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun ScanDevicesTab(
     state: com.rgbws2812.controller.model.BluetoothUiState,
     permissionsGranted: Boolean,
@@ -1534,7 +1634,23 @@ private fun DeviceList(
                         overflow = TextOverflow.Ellipsis,
                         color = if (connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
-                    Text(device.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(device.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SuggestionChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    when (device.transport) {
+                                        BluetoothTransport.BleUart -> "BLE-UART"
+                                        BluetoothTransport.ClassicSpp -> "SPP"
+                                    }
+                                )
+                            }
+                        )
+                    }
                 }
                 Button(onClick = { onConnect(device) }) {
                     Text(if (connected) "重连" else "连接")

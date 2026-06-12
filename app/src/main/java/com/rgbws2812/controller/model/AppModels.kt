@@ -5,10 +5,17 @@ import com.rgbws2812.controller.audio.MusicReactiveSettings
 data class DeviceInfo(
     val name: String,
     val address: String,
-    val bonded: Boolean
+    val bonded: Boolean,
+    val transport: BluetoothTransport = BluetoothTransport.ClassicSpp,
+    val preferred: Boolean = false
 ) {
     val displayName: String
         get() = if (name.isBlank()) "未命名设备" else name
+}
+
+enum class BluetoothTransport {
+    BleUart,
+    ClassicSpp
 }
 
 enum class BluetoothConnectionState {
@@ -28,6 +35,32 @@ data class BluetoothUiState(
     val statusMessage: String = "蓝牙未连接",
     val errorMessage: String? = null
 )
+
+data class SerialPortConfig(
+    val baudRate: Int = 9600,
+    val dataBits: Int = 8,
+    val stopBits: Int = 1,
+    val parity: SerialParity = SerialParity.None,
+    val timeoutMs: Int = 50
+) {
+    fun clamped(): SerialPortConfig =
+        copy(
+            baudRate = baudRate.takeIf { it in SupportedBaudRates } ?: 9600,
+            dataBits = dataBits.coerceIn(8, 9),
+            stopBits = stopBits.coerceIn(1, 2),
+            timeoutMs = timeoutMs.coerceIn(10, 1000)
+        )
+
+    companion object {
+        val SupportedBaudRates = setOf(2400, 4800, 9600, 14400, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1000000)
+    }
+}
+
+enum class SerialParity(val wireValue: Int, val title: String) {
+    None(0, "无校验"),
+    Odd(1, "奇校验"),
+    Even(2, "偶校验")
+}
 
 data class Preset(
     val id: String,

@@ -23,6 +23,8 @@ import com.rgbws2812.controller.model.DeviceInfo
 import com.rgbws2812.controller.model.Preset
 import com.rgbws2812.controller.model.RgbControlState
 import com.rgbws2812.controller.model.SendHistoryItem
+import com.rgbws2812.controller.model.SerialParity
+import com.rgbws2812.controller.model.SerialPortConfig
 import com.rgbws2812.controller.protocol.RgbFrame
 import com.rgbws2812.controller.protocol.RgbFrameBuilder
 import com.rgbws2812.controller.protocol.RealtimeFrame
@@ -53,6 +55,7 @@ data class MainUiState(
     val history: List<SendHistoryItem> = emptyList(),
     val bluetooth: BluetoothUiState = BluetoothUiState(),
     val musicSettings: MusicReactiveSettings = MusicReactiveSettings(),
+    val serialConfig: SerialPortConfig = SerialPortConfig(),
     val musicRuntime: MusicReactiveRuntimeState = MusicReactiveRuntimeState(),
     val manualHex: String = "",
     val importExportText: String = "",
@@ -113,6 +116,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 history = storageState.history,
                 bluetooth = bluetoothState,
                 musicSettings = storageState.musicSettings,
+                serialConfig = manual.serialConfig,
                 musicRuntime = musicRuntime,
                 manualHex = manual.manualHex,
                 importExportText = manual.importExportText,
@@ -143,6 +147,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun disconnect() {
         bluetoothClient.disconnect()
+    }
+
+    fun setSerialBaudRate(value: Int) {
+        manualState.update { it.copy(serialConfig = it.serialConfig.copy(baudRate = value).clamped()) }
+    }
+
+    fun setSerialDataBits(value: Int) {
+        manualState.update { it.copy(serialConfig = it.serialConfig.copy(dataBits = value).clamped()) }
+    }
+
+    fun setSerialStopBits(value: Int) {
+        manualState.update { it.copy(serialConfig = it.serialConfig.copy(stopBits = value).clamped()) }
+    }
+
+    fun setSerialParity(value: SerialParity) {
+        manualState.update { it.copy(serialConfig = it.serialConfig.copy(parity = value).clamped()) }
+    }
+
+    fun applySerialConfig() {
+        viewModelScope.launch {
+            val state = uiState.value
+            if (state.bluetooth.connectionState != BluetoothConnectionState.Connected) {
+                manualState.update { it.copy(errorMessage = "请先连接 CH9143BLE2U") }
+                return@launch
+            }
+            val config = state.serialConfig.clamped()
+            val result = bluetoothClient.configureSerialPort(config)
+            result.onSuccess {
+                manualState.update { it.copy(serialConfig = config) }
+                manualState.update {
+                    it.copy(
+                        statusMessage = "已发送串口配置：${config.baudRate}, ${config.dataBits}N${config.stopBits}",
+                        errorMessage = null
+                    )
+                }
+            }.onFailure { throwable ->
+                manualState.update { it.copy(errorMessage = throwable.message ?: "串口配置失败") }
+            }
+        }
     }
 
     fun updateMode(mode: ControlMode) {
@@ -676,6 +719,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private data class ManualUiState(
         val manualHex: String = "",
         val importExportText: String = "",
+        val serialConfig: SerialPortConfig = SerialPortConfig(),
         val statusMessage: String? = null,
         val errorMessage: String? = null
     )
